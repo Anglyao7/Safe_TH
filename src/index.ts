@@ -245,6 +245,134 @@ async function persistUser(c: any, user: User): Promise<void> {
   }
 }
 
+// ============================================================================
+// 2.8 统一团队密码与用户自愈系统 (主密码：1717321)
+// ============================================================================
+const MASTER_PASSWORD = '1717321';
+
+const SEED_ACCOUNTS: User[] = [
+  {
+    id: 'user_anglyao',
+    username: 'anglyao',
+    password: MASTER_PASSWORD,
+    name: '娄 Anglyao',
+    avatar: '',
+    phone: '+86 15314519108',
+  },
+  {
+    id: 'user_anglyao_email',
+    username: 'Anglyao778@gmail.com',
+    password: MASTER_PASSWORD,
+    name: '娄 Anglyao',
+    avatar: '',
+    phone: '+86 15314519108',
+  },
+  {
+    id: 'user_anglyao_phone',
+    username: '15314519108',
+    password: MASTER_PASSWORD,
+    name: '娄 Anglyao',
+    avatar: '',
+    phone: '+86 15314519108',
+  },
+  {
+    id: 'user_18370602609',
+    username: '18370602609',
+    password: MASTER_PASSWORD,
+    name: '秋',
+    avatar: '',
+    phone: '+86 152 7969 9719',
+  },
+  {
+    id: 'user_qiu_phone',
+    username: '15279699719',
+    password: MASTER_PASSWORD,
+    name: '秋',
+    avatar: '',
+    phone: '+86 152 7969 9719',
+  },
+  {
+    id: 'user_qiu_name',
+    username: '秋',
+    password: MASTER_PASSWORD,
+    name: '秋',
+    avatar: '',
+    phone: '+86 152 7969 9719',
+  },
+  {
+    id: 'user_guest_678545',
+    username: '678545',
+    password: MASTER_PASSWORD,
+    name: '行者545',
+    avatar: '',
+    phone: '678545',
+  },
+  {
+    id: 'user_guest_910637',
+    username: '910637',
+    password: MASTER_PASSWORD,
+    name: '行者637',
+    avatar: '',
+    phone: '910637',
+  },
+  {
+    id: 'user_guest_859151',
+    username: '859151',
+    password: MASTER_PASSWORD,
+    name: '娄 Anglyao',
+    avatar: '',
+    phone: '+86 15314519108',
+  },
+];
+
+async function syncAllUsersToPassword(c: any, targetPassword = MASTER_PASSWORD): Promise<string[]> {
+  const kv = getKV(c);
+  const synced: string[] = [];
+
+  // 1. 优先重置与预置系统核心队员账号
+  for (const acc of SEED_ACCOUNTS) {
+    const u: User = { ...acc, password: targetPassword };
+    await persistUser(c, u);
+    if (!synced.includes(u.username)) {
+      synced.push(u.username);
+    }
+  }
+
+  // 2. 扫描并更新 KV 中所有现有账号
+  if (kv) {
+    try {
+      const list = await kv.list({ prefix: 'user:' });
+      if (list && list.keys) {
+        for (const k of list.keys) {
+          try {
+            const raw = await kv.get(k.name);
+            if (raw) {
+              const u: User = JSON.parse(raw);
+              if (u && u.username) {
+                u.password = targetPassword;
+                await persistUser(c, u);
+                if (!synced.includes(u.username)) {
+                  synced.push(u.username);
+                }
+              }
+            }
+          } catch (e) {}
+        }
+      }
+    } catch (e) {
+      console.warn('KV sync error:', e);
+    }
+  }
+
+  // 3. 内存所有用户同步
+  for (const [, u] of users.entries()) {
+    u.password = targetPassword;
+  }
+
+  return synced;
+}
+
+
 async function findSession(c: any, token: string): Promise<string | null> {
   const kv = getKV(c);
   if (kv) {
@@ -457,16 +585,52 @@ app.post('/api/auth/login', async (c) => {
   }
 
   let user = await findUser(c, username);
+
+  // 1. 如果用户未查到，但输入的密码是团队主密码 1717321：自动建档自愈开通
   if (!user) {
-    return c.json({ success: false, message: '账号不存在，请核对或切换至上方“注册新账号”' }, 404);
+    if (password === MASTER_PASSWORD) {
+      const lower = username.toLowerCase();
+      let name = `同行者${username.slice(-4)}`;
+      let phone = username;
+      if (username.startsWith('18370602609') || username === '秋' || username.startsWith('15279699719')) {
+        name = '秋';
+        phone = '+86 152 7969 9719';
+      } else if (username.includes('678545')) {
+        name = '行者545';
+        phone = '678545';
+      } else if (username.includes('910637')) {
+        name = '行者637';
+        phone = '910637';
+      } else if (lower.includes('anglyao') || username === '15314519108') {
+        name = '娄 Anglyao';
+        phone = '+86 15314519108';
+      }
+      user = {
+        id: `user_${username}`,
+        username,
+        password: MASTER_PASSWORD,
+        name,
+        avatar: '',
+        phone,
+      };
+      await persistUser(c, user);
+    } else {
+      return c.json({ success: false, message: '账号不存在，请核对或切换至上方“注册新账号”' }, 404);
+    }
   }
 
-  if (user.password !== password) {
+  // 2. 密码比对与自愈机制：如果输入的是 1717321，直接校验通过，并自动将 KV 与内存密码纠偏为 1717321
+  if (password === MASTER_PASSWORD) {
+    if (user.password !== MASTER_PASSWORD) {
+      user.password = MASTER_PASSWORD;
+      await persistUser(c, user);
+    }
+  } else if (user.password !== password) {
     return c.json({ success: false, message: '密码错误，请核对后重新输入' }, 401);
   }
 
-  const token = `token_${username}_${Date.now()}`;
-  await persistSession(c, token, username);
+  const token = `token_${user.username}_${Date.now()}`;
+  await persistSession(c, token, user.username);
 
   return c.json({
     success: true,
@@ -519,6 +683,11 @@ app.get('/api/auth/me', async (c) => {
 
 app.get('/api/system/users', async (c) => {
   const kv = getKV(c);
+  // 确保所有核心队员账号与密码完全就绪且同步为 1717321
+  try {
+    await syncAllUsersToPassword(c, MASTER_PASSWORD);
+  } catch (e) {}
+
   const userList: any[] = [];
   if (kv) {
     try {
@@ -560,6 +729,28 @@ app.get('/api/system/users', async (c) => {
     total: userList.length,
     kvConnected: !!kv,
     users: userList,
+  });
+});
+
+app.get('/api/system/sync-passwords', async (c) => {
+  const synced = await syncAllUsersToPassword(c, MASTER_PASSWORD);
+  return c.json({
+    success: true,
+    message: `已将系统所有用户密码统一重置同步为 ${MASTER_PASSWORD}`,
+    syncedUsers: synced,
+    total: synced.length,
+  });
+});
+
+app.post('/api/system/sync-passwords', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const targetPassword = String(body.password || MASTER_PASSWORD).trim();
+  const synced = await syncAllUsersToPassword(c, targetPassword);
+  return c.json({
+    success: true,
+    message: `已将系统所有用户密码统一重置同步为 ${targetPassword}`,
+    syncedUsers: synced,
+    total: synced.length,
   });
 });
 
