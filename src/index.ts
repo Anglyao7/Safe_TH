@@ -246,130 +246,24 @@ async function persistUser(c: any, user: User): Promise<void> {
 }
 
 // ============================================================================
-// 2.8 统一团队密码与用户自愈系统 (主密码：1717321)
+// 2.8 专属账号锁定与保护 (您的专属账号 anglyao 锁定密码：1717321)
+// 其他所有队员拥有各自独立的专属密码，互不影响
 // ============================================================================
-const MASTER_PASSWORD = '1717321';
+const OWNER_USERNAMES = ['anglyao', 'anglyao778@gmail.com', '15314519108'];
+const OWNER_PASSWORD = '1717321';
 
-const SEED_ACCOUNTS: User[] = [
-  {
+async function ensureOwnerAccount(c: any): Promise<void> {
+  const ownerUser: User = {
     id: 'user_anglyao',
     username: 'anglyao',
-    password: MASTER_PASSWORD,
+    password: OWNER_PASSWORD,
     name: '娄 Anglyao',
     avatar: '',
     phone: '+86 15314519108',
-  },
-  {
-    id: 'user_anglyao_email',
-    username: 'Anglyao778@gmail.com',
-    password: MASTER_PASSWORD,
-    name: '娄 Anglyao',
-    avatar: '',
-    phone: '+86 15314519108',
-  },
-  {
-    id: 'user_anglyao_phone',
-    username: '15314519108',
-    password: MASTER_PASSWORD,
-    name: '娄 Anglyao',
-    avatar: '',
-    phone: '+86 15314519108',
-  },
-  {
-    id: 'user_18370602609',
-    username: '18370602609',
-    password: MASTER_PASSWORD,
-    name: '秋',
-    avatar: '',
-    phone: '+86 152 7969 9719',
-  },
-  {
-    id: 'user_qiu_phone',
-    username: '15279699719',
-    password: MASTER_PASSWORD,
-    name: '秋',
-    avatar: '',
-    phone: '+86 152 7969 9719',
-  },
-  {
-    id: 'user_qiu_name',
-    username: '秋',
-    password: MASTER_PASSWORD,
-    name: '秋',
-    avatar: '',
-    phone: '+86 152 7969 9719',
-  },
-  {
-    id: 'user_guest_678545',
-    username: '678545',
-    password: MASTER_PASSWORD,
-    name: '行者545',
-    avatar: '',
-    phone: '678545',
-  },
-  {
-    id: 'user_guest_910637',
-    username: '910637',
-    password: MASTER_PASSWORD,
-    name: '行者637',
-    avatar: '',
-    phone: '910637',
-  },
-  {
-    id: 'user_guest_859151',
-    username: '859151',
-    password: MASTER_PASSWORD,
-    name: '娄 Anglyao',
-    avatar: '',
-    phone: '+86 15314519108',
-  },
-];
-
-async function syncAllUsersToPassword(c: any, targetPassword = MASTER_PASSWORD): Promise<string[]> {
-  const kv = getKV(c);
-  const synced: string[] = [];
-
-  // 1. 优先重置与预置系统核心队员账号
-  for (const acc of SEED_ACCOUNTS) {
-    const u: User = { ...acc, password: targetPassword };
-    await persistUser(c, u);
-    if (!synced.includes(u.username)) {
-      synced.push(u.username);
-    }
-  }
-
-  // 2. 扫描并更新 KV 中所有现有账号
-  if (kv) {
-    try {
-      const list = await kv.list({ prefix: 'user:' });
-      if (list && list.keys) {
-        for (const k of list.keys) {
-          try {
-            const raw = await kv.get(k.name);
-            if (raw) {
-              const u: User = JSON.parse(raw);
-              if (u && u.username) {
-                u.password = targetPassword;
-                await persistUser(c, u);
-                if (!synced.includes(u.username)) {
-                  synced.push(u.username);
-                }
-              }
-            }
-          } catch (e) {}
-        }
-      }
-    } catch (e) {
-      console.warn('KV sync error:', e);
-    }
-  }
-
-  // 3. 内存所有用户同步
-  for (const [, u] of users.entries()) {
-    u.password = targetPassword;
-  }
-
-  return synced;
+  };
+  await persistUser(c, ownerUser);
+  await persistUser(c, { ...ownerUser, username: 'Anglyao778@gmail.com' });
+  await persistUser(c, { ...ownerUser, username: '15314519108' });
 }
 
 
@@ -585,48 +479,36 @@ app.post('/api/auth/login', async (c) => {
   }
 
   let user = await findUser(c, username);
+  const lower = username.toLowerCase();
+  const isOwner = OWNER_USERNAMES.includes(lower) || lower === 'anglyao';
 
-  // 1. 如果用户未查到，但输入的密码是团队主密码 1717321：自动建档自愈开通
-  if (!user) {
-    if (password === MASTER_PASSWORD) {
-      const lower = username.toLowerCase();
-      let name = `同行者${username.slice(-4)}`;
-      let phone = username;
-      if (username.startsWith('18370602609') || username === '秋' || username.startsWith('15279699719')) {
-        name = '秋';
-        phone = '+86 152 7969 9719';
-      } else if (username.includes('678545')) {
-        name = '行者545';
-        phone = '678545';
-      } else if (username.includes('910637')) {
-        name = '行者637';
-        phone = '910637';
-      } else if (lower.includes('anglyao') || username === '15314519108') {
-        name = '娄 Anglyao';
-        phone = '+86 15314519108';
+  // 1. 如果是您的专属主账号 (anglyao / Anglyao778@gmail.com / 15314519108)
+  if (isOwner) {
+    if (password === OWNER_PASSWORD) {
+      if (!user) {
+        user = {
+          id: 'user_anglyao',
+          username: username,
+          password: OWNER_PASSWORD,
+          name: '娄 Anglyao',
+          avatar: '',
+          phone: '+86 15314519108',
+        };
+      } else {
+        user.password = OWNER_PASSWORD;
       }
-      user = {
-        id: `user_${username}`,
-        username,
-        password: MASTER_PASSWORD,
-        name,
-        avatar: '',
-        phone,
-      };
       await persistUser(c, user);
     } else {
+      return c.json({ success: false, message: '密码错误，请核对后重新输入' }, 401);
+    }
+  } else {
+    // 2. 其他队友账号：各自凭各自独立注册设置的密码登录，绝不互相影响
+    if (!user) {
       return c.json({ success: false, message: '账号不存在，请核对或切换至上方“注册新账号”' }, 404);
     }
-  }
-
-  // 2. 密码比对与自愈机制：如果输入的是 1717321，直接校验通过，并自动将 KV 与内存密码纠偏为 1717321
-  if (password === MASTER_PASSWORD) {
-    if (user.password !== MASTER_PASSWORD) {
-      user.password = MASTER_PASSWORD;
-      await persistUser(c, user);
+    if (user.password !== password) {
+      return c.json({ success: false, message: '密码错误，请核对后重新输入' }, 401);
     }
-  } else if (user.password !== password) {
-    return c.json({ success: false, message: '密码错误，请核对后重新输入' }, 401);
   }
 
   const token = `token_${user.username}_${Date.now()}`;
@@ -681,11 +563,36 @@ app.get('/api/auth/me', async (c) => {
   });
 });
 
+// 单独为指定用户修改/设定密码接口 (每个账号独立管理，不影响他人)
+app.post('/api/auth/set-password', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const username = String(body.username || '').trim();
+  const newPassword = String(body.newPassword || '').trim();
+
+  if (!username || !newPassword || newPassword.length < 3) {
+    return c.json({ success: false, message: '请提供有效的账号和新密码（长度至少3位）' }, 400);
+  }
+
+  let user = await findUser(c, username);
+  if (!user) {
+    return c.json({ success: false, message: `账号【${username}】不存在` }, 404);
+  }
+
+  user.password = newPassword;
+  await persistUser(c, user);
+
+  return c.json({
+    success: true,
+    message: `已成功将账号【${username}】的密码修改完成`,
+    username: user.username,
+  });
+});
+
 app.get('/api/system/users', async (c) => {
   const kv = getKV(c);
-  // 确保所有核心队员账号与密码完全就绪且同步为 1717321
+  // 确保您的主账号安全就绪
   try {
-    await syncAllUsersToPassword(c, MASTER_PASSWORD);
+    await ensureOwnerAccount(c);
   } catch (e) {}
 
   const userList: any[] = [];
@@ -729,28 +636,6 @@ app.get('/api/system/users', async (c) => {
     total: userList.length,
     kvConnected: !!kv,
     users: userList,
-  });
-});
-
-app.get('/api/system/sync-passwords', async (c) => {
-  const synced = await syncAllUsersToPassword(c, MASTER_PASSWORD);
-  return c.json({
-    success: true,
-    message: `已将系统所有用户密码统一重置同步为 ${MASTER_PASSWORD}`,
-    syncedUsers: synced,
-    total: synced.length,
-  });
-});
-
-app.post('/api/system/sync-passwords', async (c) => {
-  const body = await c.req.json().catch(() => ({}));
-  const targetPassword = String(body.password || MASTER_PASSWORD).trim();
-  const synced = await syncAllUsersToPassword(c, targetPassword);
-  return c.json({
-    success: true,
-    message: `已将系统所有用户密码统一重置同步为 ${targetPassword}`,
-    syncedUsers: synced,
-    total: synced.length,
   });
 });
 
