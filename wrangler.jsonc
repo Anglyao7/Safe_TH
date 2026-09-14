@@ -12,15 +12,11 @@
   },
   "observability": {
     "enabled": true
-  }
-  // 全球持久化存储 KV 绑定说明：
-  // 1. 在 Cloudflare Dashboard 的 Workers -> thailand-safety-console -> Settings -> Variables & Secrets -> KV Namespace Bindings
-  //    添加变量名为: SAFETY_KV 并绑定一个 KV 命名空间（例如 safety_storage）
-  // 2. 或者在下方配置你的 kv_namespaces:
-  // "kv_namespaces": [
-  //   {
-  //     "binding": "SAFETY_KV",
-  //     "id": "你的KV空间ID"
-  //   }
-  // ]
+  },
+  "kv_namespaces": [
+    {
+      "binding": "SAFETY_KV",
+      "id": "c6d66cccbf194c6388030c5abf9fca50"
+    }
+  ]
 }

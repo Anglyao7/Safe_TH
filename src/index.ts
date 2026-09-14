@@ -441,6 +441,52 @@ app.get('/api/auth/me', async (c) => {
   });
 });
 
+app.get('/api/system/users', async (c) => {
+  const kv = getKV(c);
+  const userList: any[] = [];
+  if (kv) {
+    try {
+      const list = await kv.list({ prefix: 'user:' });
+      if (list && list.keys) {
+        for (const k of list.keys) {
+          const val = await kv.get(k.name);
+          if (val) {
+            try {
+              const u = JSON.parse(val);
+              if (!userList.some((existing) => existing.username === u.username)) {
+                userList.push({
+                  username: u.username,
+                  name: u.name,
+                  phone: u.phone,
+                });
+              }
+            } catch (e) {}
+          }
+        }
+      }
+    } catch (e) {}
+  }
+  // 检查内存中的用户并合并至列表与 KV
+  for (const [, u] of users.entries()) {
+    if (!userList.some((existing) => existing.username === u.username)) {
+      userList.push({
+        username: u.username,
+        name: u.name,
+        phone: u.phone,
+      });
+      if (kv) {
+        persistUser(c, u).catch(() => {});
+      }
+    }
+  }
+  return c.json({
+    success: true,
+    total: userList.length,
+    kvConnected: !!kv,
+    users: userList,
+  });
+});
+
 // ============================================================================
 // 4. 多人小队实时位置共享与雷达接口
 // ============================================================================
