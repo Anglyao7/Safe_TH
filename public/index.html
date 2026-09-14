@@ -579,6 +579,31 @@
                       <i data-lucide="map-pin"></i>
                       <span id="radar-calibrate-btn-text">微调校准</span>
                     </button>
+                    <div class="radar-layer-dropdown-wrapper">
+                      <button id="radar-layer-toggle-btn" class="button button-outline button-compact" type="button" title="切换底图图层源 (纯净无水印)">
+                        <i data-lucide="layers"></i>
+                        <span id="radar-layer-current-name">高德线图</span>
+                        <i data-lucide="chevron-down" style="width:12px;height:12px;margin-left:2px;"></i>
+                      </button>
+                      <div id="radar-layer-popover" class="radar-layer-popover glass-card" hidden>
+                        <div class="radar-layer-item active" data-layer-id="amap">
+                          <strong>高德官方矢量线图</strong>
+                          <span>国内首选 · 纯净无水印 · 中文路网</span>
+                        </div>
+                        <div class="radar-layer-item" data-layer-id="osm">
+                          <strong>全球标准出行线图</strong>
+                          <span>泰国/海外首选 · 纯净无水印 · OSM标准</span>
+                        </div>
+                        <div class="radar-layer-item" data-layer-id="dark">
+                          <strong>深曜石极客暗色线图</strong>
+                          <span>暗夜护盾 · 纯净无水印 · 高对比</span>
+                        </div>
+                        <div class="radar-layer-item" data-layer-id="sat">
+                          <strong>高德全景卫星影像</strong>
+                          <span>高清航拍 · 纯净无水印 · 地形地貌</span>
+                        </div>
+                      </div>
+                    </div>
                     <button id="radar-fit-bounds-btn" class="button button-secondary button-compact" type="button">
                       <i data-lucide="maximize-2"></i>
                       <span>自适应全员视野</span>

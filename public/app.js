@@ -27,13 +27,71 @@
     city: '曼谷 (Bangkok)',
   };
 
-  const MAP_TILES = {
-    DARK: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    LIGHT: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+  const MAP_SOURCES = {
+    amap: {
+      id: 'amap',
+      name: '高德线图',
+      fullName: '高德官方矢量线图',
+      url: 'https://wprd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=7&x={x}&y={y}&z={z}',
+      options: {
+        subdomains: '1234',
+        maxZoom: 18,
+        minZoom: 3,
+        attribution: '© AutoNavi',
+      },
+    },
+    osm: {
+      id: 'osm',
+      name: '全球线图',
+      fullName: '全球标准出行线图 (OSM)',
+      url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+      options: {
+        maxZoom: 19,
+        minZoom: 1,
+        attribution: '© OpenStreetMap contributors',
+      },
+    },
+    dark: {
+      id: 'dark',
+      name: '深曜极客',
+      fullName: '深曜石极客暗色线图 (ESRI)',
+      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+      options: {
+        maxZoom: 16,
+        minZoom: 1,
+        attribution: '© Esri, HERE, Garmin',
+      },
+    },
+    sat: {
+      id: 'sat',
+      name: '高德卫星',
+      fullName: '高德全景卫星影像',
+      url: 'https://wprd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=6&x={x}&y={y}&z={z}',
+      options: {
+        subdomains: '1234',
+        maxZoom: 18,
+        minZoom: 3,
+        attribution: '© AutoNavi Satellite',
+      },
+    },
   };
+
+  function getStoredMapSource() {
+    try {
+      const s = localStorage.getItem('thai_service_map_source');
+      if (s && MAP_SOURCES[s]) return s;
+    } catch (e) {}
+    return 'amap';
+  }
+
+  function createTileLayer(sourceId) {
+    const src = MAP_SOURCES[sourceId] || MAP_SOURCES.amap;
+    return L.tileLayer(src.url, src.options);
+  }
 
   let state = {
     theme: 'dark',
+    currentMapSource: getStoredMapSource(),
     user: null,
     token: null,
     teamCode: '666888',
@@ -212,13 +270,9 @@
       themeBtn.innerHTML = `<i data-lucide="${isLight ? 'moon' : 'sun'}" id="theme-toggle-icon"></i>`;
     }
 
-    // 联动 Leaflet 地图瓦片色彩
-    if (state.tileLayer) {
-      state.tileLayer.setUrl(isLight ? MAP_TILES.LIGHT : MAP_TILES.DARK);
-    }
-    if (state.radarTileLayer) {
-      state.radarTileLayer.setUrl(isLight ? MAP_TILES.LIGHT : MAP_TILES.DARK);
-    }
+    // 保持纯净底图图层，自适应容器渲染
+    if (state.map) state.map.invalidateSize();
+    if (state.radarMap) state.radarMap.invalidateSize();
 
     if (save) {
       try {
@@ -328,20 +382,15 @@
 
     const initialLat = state.location.lat || DEFAULT_BANGKOK.lat;
     const initialLng = state.location.lng || DEFAULT_BANGKOK.lng;
+    const disp = toMapCoordinate(initialLat, initialLng);
 
     state.map = L.map('map', {
       zoomControl: false,
       attributionControl: false,
-    }).setView([initialLat, initialLng], 12);
+    }).setView([disp.lat, disp.lng], 12);
 
-    // 地图主题瓦片（根据深浅色动态加载 CartoDB Dark Matter / Positron）
-    state.tileLayer = L.tileLayer(
-      state.theme === 'light' ? MAP_TILES.LIGHT : MAP_TILES.DARK,
-      {
-        subdomains: 'abcd',
-        maxZoom: 19,
-      }
-    ).addTo(state.map);
+    // 默认加载高德官方矢量线图，纯净无水印
+    state.tileLayer = createTileLayer(state.currentMapSource).addTo(state.map);
 
     // 定制高科技脉冲标记
     const pulseIcon = L.divIcon({
@@ -356,7 +405,7 @@
       iconAnchor: [11, 11],
     });
 
-    state.marker = L.marker([initialLat, initialLng], { icon: pulseIcon }).addTo(state.map);
+    state.marker = L.marker([disp.lat, disp.lng], { icon: pulseIcon }).addTo(state.map);
 
     // 定位主切换按钮与状态指示胶囊
     const toggleBtn = document.getElementById('location-toggle');
@@ -454,6 +503,83 @@
     };
   }
 
+  // 地图瓦片源坐标系映射：高德国内底图采用 GCJ-02，全球 OSM / ESRI 采用 WGS-84
+  function toMapCoordinate(lat, lng) {
+    if (!lat || !lng) return { lat: DEFAULT_BANGKOK.lat, lng: DEFAULT_BANGKOK.lng };
+    if (!isChinaCoordinate(lng, lat)) {
+      return { lat: Number(lat), lng: Number(lng) };
+    }
+    if (state.currentMapSource === 'amap' || state.currentMapSource === 'sat') {
+      return wgs84ToGcj02(lng, lat);
+    }
+    return { lat: Number(lat), lng: Number(lng) };
+  }
+
+  function fromMapCoordinate(lat, lng) {
+    if (!lat || !lng) return { lat: DEFAULT_BANGKOK.lat, lng: DEFAULT_BANGKOK.lng };
+    if (!isChinaCoordinate(lng, lat)) {
+      return { lat: Number(lat), lng: Number(lng) };
+    }
+    if (state.currentMapSource === 'amap' || state.currentMapSource === 'sat') {
+      return gcj02ToWgs84(lng, lat);
+    }
+    return { lat: Number(lat), lng: Number(lng) };
+  }
+
+  // 切换地图源（高德线图 / 全球OSM / 深曜暗色 / 高德卫星）
+  function switchMapSource(sourceId, notify = true) {
+    const src = MAP_SOURCES[sourceId];
+    if (!src) return;
+
+    state.currentMapSource = sourceId;
+    try {
+      localStorage.setItem('thai_service_map_source', sourceId);
+    } catch (e) {}
+
+    // 1. 更新概览中控底图
+    if (state.map && state.tileLayer) {
+      state.map.removeLayer(state.tileLayer);
+      state.tileLayer = createTileLayer(sourceId).addTo(state.map);
+    }
+
+    // 2. 更新雷达全屏底图
+    if (state.radarMap && state.radarTileLayer) {
+      state.radarMap.removeLayer(state.radarTileLayer);
+      state.radarTileLayer = createTileLayer(sourceId).addTo(state.radarMap);
+    }
+
+    // 3. 更新雷达顶部工具栏切换按钮与下拉列表激活项
+    const currentNameEl = document.getElementById('radar-layer-current-name');
+    if (currentNameEl) {
+      currentNameEl.textContent = src.name;
+    }
+
+    const layerItems = document.querySelectorAll('.radar-layer-item');
+    layerItems.forEach((item) => {
+      if (item.getAttribute('data-layer-id') === sourceId) {
+        item.classList.add('active');
+      } else {
+        item.classList.remove('active');
+      }
+    });
+
+    // 4. 重定位地图视野及标点（GCJ-02 <-> WGS-84 自动对齐当前底图）
+    if (state.map && state.marker) {
+      const myLat = state.location.lat || DEFAULT_BANGKOK.lat;
+      const myLng = state.location.lng || DEFAULT_BANGKOK.lng;
+      const disp = toMapCoordinate(myLat, myLng);
+      state.marker.setLatLng([disp.lat, disp.lng]);
+    }
+    if (state.radarMap) {
+      updateMyRadarMarker();
+    }
+    updateTeamMapMarkers();
+
+    if (notify) {
+      showToast(`底图已切换至：${src.fullName} (纯净无水印)`);
+    }
+  }
+
   function initAMapGeolocation() {
     if (window.AMap && window.AMap.Geolocation && !amapGeolocationInstance) {
       try {
@@ -506,7 +632,8 @@
   }
 
   function applyLocationToMaps(lat, lng) {
-    const newLatLng = [lat, lng];
+    const disp = toMapCoordinate(lat, lng);
+    const newLatLng = [disp.lat, disp.lng];
     if (state.map && state.marker) {
       state.marker.setLatLng(newLatLng);
       state.map.setView(newLatLng, 15);
@@ -518,24 +645,25 @@
   }
 
   function applyManualCalibration(lat, lng) {
+    const norm = fromMapCoordinate(lat, lng);
     const nowStr = new Date().toLocaleTimeString('zh-CN', { hour12: false });
     state.location = {
       ...state.location,
-      lat: Number(lat.toFixed(6)),
-      lng: Number(lng.toFixed(6)),
+      lat: Number(norm.lat.toFixed(6)),
+      lng: Number(norm.lng.toFixed(6)),
       accuracy: 5,
       updated: nowStr,
       granted: true,
       source: 'manual',
     };
 
-    reverseGeocodeLocation(lat, lng);
+    reverseGeocodeLocation(norm.lat, norm.lng);
 
     try {
       localStorage.setItem(STORAGE_KEYS.LAST_LOCATION, JSON.stringify(state.location));
     } catch (e) {}
 
-    applyLocationToMaps(lat, lng);
+    applyLocationToMaps(norm.lat, norm.lng);
     updateLocationUI();
     updateReadinessScore();
 
@@ -543,7 +671,7 @@
       reportMyLocation();
     }
 
-    showToast(`定位已精准对齐至：[${lat.toFixed(4)}, ${lng.toFixed(4)}] (全队已同步)`);
+    showToast(`定位已精准对齐至：[${norm.lat.toFixed(4)}, ${norm.lng.toFixed(4)}] (全队已同步)`);
   }
 
   function handleAMapLocationSuccess(result, manualTrigger) {
@@ -1445,19 +1573,20 @@ ${googleMapUrl}
     if (!state.radarMap || !window.L) return;
     const myLat = state.location.lat || DEFAULT_BANGKOK.lat;
     const myLng = state.location.lng || DEFAULT_BANGKOK.lng;
+    const disp = toMapCoordinate(myLat, myLng);
 
     const icon = createMyRadarIcon();
     const myName = state.profile.name || (state.user && state.user.name) || '我';
 
     if (!state.radarMarker) {
-      state.radarMarker = L.marker([myLat, myLng], { icon, zIndexOffset: 1000 }).addTo(state.radarMap);
+      state.radarMarker = L.marker([disp.lat, disp.lng], { icon, zIndexOffset: 1000 }).addTo(state.radarMap);
       state.radarMarker.on('dragend', (e) => {
         const pos = e.target.getLatLng();
         applyManualCalibration(pos.lat, pos.lng);
       });
     } else {
       state.radarMarker.setIcon(icon);
-      state.radarMarker.setLatLng([myLat, myLng]);
+      state.radarMarker.setLatLng([disp.lat, disp.lng]);
     }
 
     const locSource = state.location.source === 'amap'
@@ -1480,19 +1609,15 @@ ${googleMapUrl}
 
     const initialLat = state.location.lat || DEFAULT_BANGKOK.lat;
     const initialLng = state.location.lng || DEFAULT_BANGKOK.lng;
+    const disp = toMapCoordinate(initialLat, initialLng);
 
     state.radarMap = L.map('radar-fullscreen-map', {
       zoomControl: true,
       attributionControl: false,
-    }).setView([initialLat, initialLng], 13);
+    }).setView([disp.lat, disp.lng], 13);
 
-    state.radarTileLayer = L.tileLayer(
-      state.theme === 'light' ? MAP_TILES.LIGHT : MAP_TILES.DARK,
-      {
-        subdomains: 'abcd',
-        maxZoom: 19,
-      }
-    ).addTo(state.radarMap);
+    // 默认加载高德官方矢量线图，纯净无水印
+    state.radarTileLayer = createTileLayer(state.currentMapSource).addTo(state.radarMap);
 
     updateMyRadarMarker();
 
@@ -1502,7 +1627,8 @@ ${googleMapUrl}
       locateMeBtn.addEventListener('click', () => {
         const myLat = state.location.lat || DEFAULT_BANGKOK.lat;
         const myLng = state.location.lng || DEFAULT_BANGKOK.lng;
-        state.radarMap?.flyTo([myLat, myLng], 15);
+        const targetDisp = toMapCoordinate(myLat, myLng);
+        state.radarMap?.flyTo([targetDisp.lat, targetDisp.lng], 15);
         showToast('已聚焦至我的当前位置');
       });
     }
@@ -1638,6 +1764,62 @@ ${googleMapUrl}
       });
     }
 
+    // 绑定底图切换按钮与弹出面板
+    const layerToggleBtn = document.getElementById('radar-layer-toggle-btn');
+    const layerPopover = document.getElementById('radar-layer-popover');
+
+    if (layerToggleBtn && layerPopover) {
+      function setLayerPopoverOpen(open) {
+        if (open) {
+          layerPopover.removeAttribute('hidden');
+          layerToggleBtn.classList.add('active');
+          layerToggleBtn.setAttribute('aria-expanded', 'true');
+        } else {
+          layerPopover.setAttribute('hidden', '');
+          layerToggleBtn.classList.remove('active');
+          layerToggleBtn.setAttribute('aria-expanded', 'false');
+        }
+      }
+
+      layerToggleBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isHidden = layerPopover.hasAttribute('hidden');
+        setLayerPopoverOpen(isHidden);
+      });
+
+      const layerItems = layerPopover.querySelectorAll('.radar-layer-item');
+      layerItems.forEach((item) => {
+        item.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const layerId = item.getAttribute('data-layer-id');
+          if (layerId) {
+            switchMapSource(layerId);
+            setLayerPopoverOpen(false);
+          }
+        });
+      });
+
+      // 点击外部区域自动收起
+      document.addEventListener('click', (e) => {
+        if (!layerPopover.hasAttribute('hidden')) {
+          const wrapper = document.querySelector('.radar-layer-dropdown-wrapper');
+          if (wrapper && !wrapper.contains(e.target)) {
+            setLayerPopoverOpen(false);
+          }
+        }
+      });
+
+      // 按 ESC 键快速关闭
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !layerPopover.hasAttribute('hidden')) {
+          setLayerPopoverOpen(false);
+        }
+      });
+    }
+
+    // 默认高德线图状态初始化
+    switchMapSource(state.currentMapSource, false);
+
     // 自动监听容器尺寸变化（支持页面加载、面板切换、窗口调整自适应渲染瓦片）
     if (window.ResizeObserver) {
       const resizeObserver = new ResizeObserver(() => {
@@ -1744,12 +1926,14 @@ ${googleMapUrl}
     const points = [];
     const myLat = state.location.lat || DEFAULT_BANGKOK.lat;
     const myLng = state.location.lng || DEFAULT_BANGKOK.lng;
-    points.push([myLat, myLng]);
+    const myDisp = toMapCoordinate(myLat, myLng);
+    points.push([myDisp.lat, myDisp.lng]);
 
     state.teamMembers.forEach((m) => {
       const isMe = state.user && (m.userId === state.user.id || m.username === state.user.username);
       if (!isMe && m.lat && m.lng) {
-        points.push([m.lat, m.lng]);
+        const mDisp = toMapCoordinate(m.lat, m.lng);
+        points.push([mDisp.lat, mDisp.lng]);
       }
     });
 
@@ -1882,7 +2066,8 @@ ${googleMapUrl}
 
         item.addEventListener('click', () => {
           if (state.radarMap) {
-            state.radarMap.flyTo([member.lat, member.lng], 16, { duration: 1.2 });
+            const disp = toMapCoordinate(member.lat, member.lng);
+            state.radarMap.flyTo([disp.lat, disp.lng], 16, { duration: 1.2 });
             const marker = state.radarTeamMarkers.get(member.userId);
             if (marker) {
               setTimeout(() => marker.openPopup(), 1200);
@@ -1947,13 +2132,14 @@ ${googleMapUrl}
       const isGuide = member.username === '888888';
 
       const teamPinIcon = createTeamPinIcon(member, isGuide, myLat, myLng);
+      const disp = toMapCoordinate(member.lat, member.lng);
 
       if (markerMap.has(member.userId)) {
         const existingMarker = markerMap.get(member.userId);
-        existingMarker.setLatLng([member.lat, member.lng]);
+        existingMarker.setLatLng([disp.lat, disp.lng]);
         existingMarker.setIcon(teamPinIcon);
       } else {
-        const newMarker = L.marker([member.lat, member.lng], { icon: teamPinIcon }).addTo(mapInstance);
+        const newMarker = L.marker([disp.lat, disp.lng], { icon: teamPinIcon }).addTo(mapInstance);
         newMarker.bindPopup(`
           <div style="font-size: 0.85rem; padding: 4px;">
             <strong style="display:block;margin-bottom:2px;">${escapeHtml(member.name)}</strong>
@@ -2174,15 +2360,16 @@ ${googleMapUrl}
           if (state.radarMap) {
             const isGuide = target.username === '888888';
             const pinIcon = createTeamPinIcon(target, isGuide, myLat, myLng);
+            const disp = toMapCoordinate(target.lat, target.lng);
             if (!trackingTargetMarker) {
-              trackingTargetMarker = L.marker([target.lat, target.lng], { icon: pinIcon, zIndexOffset: 2000 }).addTo(state.radarMap);
+              trackingTargetMarker = L.marker([disp.lat, disp.lng], { icon: pinIcon, zIndexOffset: 2000 }).addTo(state.radarMap);
             } else {
               trackingTargetMarker.setIcon(pinIcon);
-              trackingTargetMarker.setLatLng([target.lat, target.lng]);
+              trackingTargetMarker.setLatLng([disp.lat, disp.lng]);
             }
 
             if (isFirst) {
-              state.radarMap.flyTo([target.lat, target.lng], 16, { duration: 1.5 });
+              state.radarMap.flyTo([disp.lat, disp.lng], 16, { duration: 1.5 });
               showToast(`已成功锁定【${target.name}】的实时动态位置！`);
             }
           }
@@ -2196,7 +2383,8 @@ ${googleMapUrl}
     if (focusBtn) {
       focusBtn.onclick = () => {
         if (currentTargetData && state.radarMap) {
-          state.radarMap.flyTo([currentTargetData.lat, currentTargetData.lng], 16);
+          const disp = toMapCoordinate(currentTargetData.lat, currentTargetData.lng);
+          state.radarMap.flyTo([disp.lat, disp.lng], 16);
           showToast(`已居中聚焦【${currentTargetData.name}】`);
         }
       };

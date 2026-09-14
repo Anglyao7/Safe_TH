@@ -3268,6 +3268,67 @@ html[data-theme="light"] .radar-live-tracking-banner {
   background: var(--border-subtle);
 }
 
+/* 地图源图层切换下拉面板 */
+.radar-layer-dropdown-wrapper {
+  position: relative;
+  display: inline-flex;
+}
+
+.radar-layer-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  width: 260px;
+  z-index: 1000;
+  padding: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--border-subtle);
+  border-radius: var(--radius-md);
+  animation: popover-fade-in 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.radar-layer-popover[hidden] {
+  display: none !important;
+}
+
+.radar-layer-item {
+  padding: 0.55rem 0.75rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  border: 1px solid transparent;
+  background: transparent;
+  transition: all var(--transition-fast);
+}
+
+.radar-layer-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--border-subtle);
+}
+
+.radar-layer-item.active {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.35);
+}
+
+.radar-layer-item.active strong {
+  color: var(--emerald-400);
+}
+
+.radar-layer-item strong {
+  display: block;
+  font-size: 0.82rem;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+
+.radar-layer-item span {
+  display: block;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+}
+
 /* 在线成员收缩药丸胶囊按钮与浮层下拉面板 */
 .radar-roster-dropdown-wrapper {
   position: relative;
@@ -3658,6 +3719,24 @@ html[data-theme="light"] .roster-popover-close:hover {
 
 html[data-theme="light"] .roster-popover-footer {
   border-top-color: rgba(15, 23, 42, 0.08);
+}
+
+html[data-theme="light"] .radar-layer-popover {
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(15, 23, 42, 0.08);
+}
+
+html[data-theme="light"] .radar-layer-item:hover {
+  background: #f1f5f9;
+}
+
+html[data-theme="light"] .radar-layer-item.active {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: var(--emerald-500);
+}
+
+html[data-theme="light"] .radar-layer-item.active strong {
+  color: var(--emerald-600);
 }
 
 
