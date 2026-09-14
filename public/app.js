@@ -1575,10 +1575,7 @@ ${googleMapUrl}
     if (ucSwitchTeamBtn) {
       ucSwitchTeamBtn.addEventListener('click', () => {
         userCenterModal?.setAttribute('hidden', '');
-        const teamModal = document.getElementById('team-modal');
-        const input = document.getElementById('team-code-input');
-        if (input) input.value = state.teamCode;
-        teamModal?.removeAttribute('hidden');
+        openTeamModal();
       });
     }
 
@@ -2002,10 +1999,7 @@ ${googleMapUrl}
     const openRoomModalBtn = document.getElementById('radar-open-room-modal-btn');
     if (openRoomModalBtn) {
       openRoomModalBtn.addEventListener('click', () => {
-        const teamModal = document.getElementById('team-modal');
-        const input = document.getElementById('team-code-input');
-        if (input) input.value = state.teamCode;
-        if (teamModal) teamModal.removeAttribute('hidden');
+        openTeamModal();
       });
     }
 
@@ -2148,6 +2142,19 @@ ${googleMapUrl}
   // ==========================================
   // 10. 多人小队雷达与实时位置共享生命周期体系
   // ==========================================
+  function openTeamModal(cleanForNew = false) {
+    const teamModal = document.getElementById('team-modal');
+    const input = document.getElementById('team-code-input');
+    if (input) {
+      input.value = cleanForNew ? '' : (state.teamCode || '');
+      setTimeout(() => {
+        input.focus();
+        input.select();
+      }, 80);
+    }
+    if (teamModal) teamModal.removeAttribute('hidden');
+  }
+
   function initTeamSystem() {
     const switchBtn = document.getElementById('switch-team-btn');
     const teamModal = document.getElementById('team-modal');
@@ -2157,11 +2164,17 @@ ${googleMapUrl}
     // 随机房间号生成按钮
     const randomCodeBtn = document.getElementById('team-code-random-btn');
     if (randomCodeBtn) {
-      randomCodeBtn.addEventListener('click', () => {
+      randomCodeBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         const input = document.getElementById('team-code-input');
         const randNum = Math.floor(1000 + Math.random() * 9000);
         const randCode = `TH${randNum}`;
-        if (input) input.value = randCode;
+        if (input) {
+          input.value = randCode;
+          input.focus();
+          input.select();
+        }
         showToast(`已生成专属房间号 #${randCode}，点击确认即可创建并成为房主！`);
       });
     }
@@ -2181,11 +2194,9 @@ ${googleMapUrl}
 
     updateRoomBadgesUI();
 
-    if (switchBtn && teamModal) {
+    if (switchBtn) {
       switchBtn.addEventListener('click', () => {
-        const input = document.getElementById('team-code-input');
-        if (input) input.value = state.teamCode || '';
-        teamModal.removeAttribute('hidden');
+        openTeamModal();
       });
     }
 
@@ -2225,7 +2236,6 @@ ${googleMapUrl}
   function updateRoomBadgesUI() {
     const overviewBadge = document.getElementById('team-room-code-badge');
     const radarBadge = document.getElementById('radar-room-badge');
-    const modalInput = document.getElementById('team-code-input');
     const ucTeam = document.getElementById('uc-team-code');
     const ucLeaveBtn = document.getElementById('uc-leave-team-btn');
 
@@ -2249,7 +2259,6 @@ ${googleMapUrl}
     if (hasTeam) {
       if (overviewBadge) overviewBadge.textContent = `房间号 #${state.teamCode}`;
       if (radarBadge) radarBadge.innerHTML = `<i data-lucide="hash"></i> 房间号 #${state.teamCode}`;
-      if (modalInput) modalInput.value = state.teamCode;
       if (ucTeam) ucTeam.textContent = `#${state.teamCode}`;
       if (ucLeaveBtn) ucLeaveBtn.style.display = 'inline-flex';
 
@@ -2278,7 +2287,6 @@ ${googleMapUrl}
     } else {
       if (overviewBadge) overviewBadge.textContent = '单人独立守护模式';
       if (radarBadge) radarBadge.innerHTML = '<i data-lucide="shield"></i> 单人守护模式';
-      if (modalInput) modalInput.value = '';
       if (ucTeam) ucTeam.textContent = '未加入小队 (个人模式)';
       if (ucLeaveBtn) ucLeaveBtn.style.display = 'none';
 
@@ -2298,6 +2306,11 @@ ${googleMapUrl}
     state.teamCode = code;
     try {
       localStorage.setItem(STORAGE_KEYS.TEAM_CODE, code);
+      const url = new URL(window.location.href);
+      if (url.searchParams.has('room')) {
+        url.searchParams.set('room', code);
+        window.history.replaceState({}, '', url.toString());
+      }
     } catch (e) {}
 
     updateRoomBadgesUI();
@@ -2333,6 +2346,11 @@ ${googleMapUrl}
     state.teamCode = '';
     try {
       localStorage.setItem(STORAGE_KEYS.TEAM_CODE, '');
+      const url = new URL(window.location.href);
+      if (url.searchParams.has('room')) {
+        url.searchParams.delete('room');
+        window.history.replaceState({}, '', url.toString());
+      }
     } catch (e) {}
 
     state.teamMembers = [];
@@ -2376,6 +2394,11 @@ ${googleMapUrl}
           state.teamCode = '';
           try {
             localStorage.setItem(STORAGE_KEYS.TEAM_CODE, '');
+            const url = new URL(window.location.href);
+            if (url.searchParams.has('room')) {
+              url.searchParams.delete('room');
+              window.history.replaceState({}, '', url.toString());
+            }
           } catch (e) {}
 
           state.teamMembers = [];
