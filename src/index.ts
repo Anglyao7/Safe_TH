@@ -48,35 +48,7 @@ const teamLocations = new Map<string, Map<string, TeamMemberLocation>>(); // tea
 const userLatestLocations = new Map<string, UserTrackingLocation>(); // identifier -> latest location
 const storedImages = new Map<string, StoredImage>();
 
-// 预设种子演示数据：默认小队 666888 内置一位同行向导队友，进入小队立即可见！
-users.set('888888', {
-  id: 'user_888888',
-  username: '888888',
-  password: '123',
-  name: '阿泰 (曼谷向导)',
-  avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
-  phone: '+66 81 234 5678',
-});
 
-const defaultGuideLoc: UserTrackingLocation = {
-  userId: 'user_888888',
-  username: '888888',
-  name: '阿泰 (曼谷向导)',
-  avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
-  phone: '+66 81 234 5678',
-  lat: 13.7545,
-  lng: 100.5065,
-  accuracy: 15,
-  status: 'normal',
-  updatedAt: Date.now(),
-  teamCode: '666888',
-};
-
-const defaultTeamMap = new Map<string, TeamMemberLocation>();
-defaultTeamMap.set('user_888888', defaultGuideLoc);
-teamLocations.set('666888', defaultTeamMap);
-userLatestLocations.set('888888', defaultGuideLoc);
-userLatestLocations.set('user_888888', defaultGuideLoc);
 
 // ============================================================================
 // 2. 存活探针与应急官方电话接口
@@ -190,18 +162,6 @@ app.post('/api/auth/login', async (c) => {
 
   if (!username || !password) {
     return c.json({ success: false, message: '请输入账号和密码' }, 400);
-  }
-
-  // 检查演示向导账号自动兜底
-  if (username === '888888' && !users.has('888888')) {
-    users.set('888888', {
-      id: 'user_888888',
-      username: '888888',
-      password: '123',
-      name: '阿泰 (曼谷向导)',
-      avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
-      phone: '+66 81 234 5678',
-    });
   }
 
   let user = users.get(username);
@@ -351,10 +311,6 @@ function handleTrackingLookup(c: any, identifier: string) {
   }
 
   const now = Date.now();
-  if (loc.username === '888888') {
-    loc.updatedAt = now;
-  }
-
   const secondsAgo = Math.max(0, Math.round((now - loc.updatedAt) / 1000));
   let timeAgoText = '刚刚';
   if (secondsAgo < 60) {
@@ -396,14 +352,11 @@ app.get('/api/team/members', (c) => {
     });
   }
 
-  // 过滤掉超过 20 分钟未更新心跳的离线用户（保留种子向导）
+  // 过滤掉超过 20 分钟未更新心跳的离线用户
   const now = Date.now();
   const memberList: TeamMemberLocation[] = [];
 
-  for (const [uid, loc] of team.entries()) {
-    if (uid === 'user_888888') {
-      loc.updatedAt = now; // 保持向导在线
-    }
+  for (const [, loc] of team.entries()) {
     if (now - loc.updatedAt < 20 * 60 * 1000) {
       memberList.push(loc);
     }

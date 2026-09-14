@@ -1586,17 +1586,7 @@ ${googleMapUrl}
       });
     }
 
-    // 演示向导快捷填入按钮
-    const loginDemoBtn = document.getElementById('login-demo-btn');
-    if (loginDemoBtn) {
-      loginDemoBtn.addEventListener('click', () => {
-        const u = document.getElementById('login-username');
-        const p = document.getElementById('login-password');
-        if (u) u.value = '888888';
-        if (p) p.value = '123';
-        submitLogin('888888', '123', true);
-      });
-    }
+
 
     // 登录表单提交
     if (formLogin) {
@@ -2361,14 +2351,13 @@ ${googleMapUrl}
         const isMe = state.user && (member.userId === state.user.id || member.username === state.user.username);
         const distM = calculateDistance(myLat, myLng, member.lat, member.lng);
         const distStr = isMe ? '当前位置' : formatDistance(distM);
-        const isGuide = member.username === '888888';
 
         const item = document.createElement('div');
         item.className = 'radar-roster-item';
         item.title = '点击可在地图上聚焦该成员';
         item.innerHTML = `
           <div class="radar-roster-left">
-            <div class="radar-roster-avatar ${isGuide ? 'is-guide' : ''}">
+            <div class="radar-roster-avatar">
               ${
                 member.avatar
                   ? `<img src="${member.avatar}" alt="${escapeHtml(member.name)}">`
@@ -2376,7 +2365,7 @@ ${googleMapUrl}
               }
             </div>
             <div class="radar-roster-info">
-              <strong>${escapeHtml(member.name)} ${isMe ? '<span style="color:var(--blue-400);font-size:0.75rem;">(我)</span>' : ''} ${isGuide ? '<span style="color:var(--amber-400);font-size:0.72rem;">(官方向导)</span>' : ''}</strong>
+              <strong>${escapeHtml(member.name)} ${isMe ? '<span style="color:var(--blue-400);font-size:0.75rem;">(我)</span>' : ''}</strong>
               <span>${member.phone || '未公开电话'} · 经纬: ${member.lat.toFixed(3)}, ${member.lng.toFixed(3)}</span>
             </div>
           </div>
@@ -2404,7 +2393,7 @@ ${googleMapUrl}
     initIcons();
   }
 
-  function createTeamPinIcon(member, isGuide, myLat, myLng) {
+  function createTeamPinIcon(member, myLat, myLng) {
     const distM = calculateDistance(myLat, myLng, member.lat, member.lng);
     const distStr = formatDistance(distM);
 
@@ -2413,11 +2402,10 @@ ${googleMapUrl}
       : escapeHtml(member.name ? member.name.charAt(0) : '友');
 
     const pinHtml = `
-      <div class="radar-avatar-marker ${isGuide ? 'is-guide' : ''}">
+      <div class="radar-avatar-marker">
         <div class="radar-avatar-pulse"></div>
         <div class="radar-avatar-bubble">
           <span>${escapeHtml(member.name)}</span>
-          ${isGuide ? '<span style="color:#fbbf24;font-size:0.68rem;margin-left:2px;">(向导)</span>' : ''}
           <span class="pin-dist">(${distStr})</span>
         </div>
         <div class="radar-avatar-ring">
@@ -2450,9 +2438,8 @@ ${googleMapUrl}
       activeUserIds.add(member.userId);
       const distM = calculateDistance(myLat, myLng, member.lat, member.lng);
       const distStr = formatDistance(distM);
-      const isGuide = member.username === '888888';
 
-      const teamPinIcon = createTeamPinIcon(member, isGuide, myLat, myLng);
+      const teamPinIcon = createTeamPinIcon(member, myLat, myLng);
       const disp = toMapCoordinate(member.lat, member.lng);
 
       if (markerMap.has(member.userId)) {
@@ -2679,8 +2666,7 @@ ${googleMapUrl}
 
           // 在地图上突出渲染目标头像标点
           if (state.radarMap) {
-            const isGuide = target.username === '888888';
-            const pinIcon = createTeamPinIcon(target, isGuide, myLat, myLng);
+            const pinIcon = createTeamPinIcon(target, myLat, myLng);
             const disp = toMapCoordinate(target.lat, target.lng);
             if (!trackingTargetMarker) {
               trackingTargetMarker = L.marker([disp.lat, disp.lng], { icon: pinIcon, zIndexOffset: 2000 }).addTo(state.radarMap);

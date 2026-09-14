@@ -2940,18 +2940,11 @@ body,
   animation: radar-avatar-ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;
 }
 
-.radar-avatar-marker:not(.is-me):not(.is-guide) .radar-avatar-pulse,
-.team-marker-pin:not(.is-guide) .radar-avatar-pulse {
+.radar-avatar-marker:not(.is-me) .radar-avatar-pulse,
+.team-marker-pin .radar-avatar-pulse {
   background: rgba(16, 185, 129, 0.4);
   box-shadow: 0 0 12px rgba(16, 185, 129, 0.5);
   animation: radar-avatar-ping 2.2s cubic-bezier(0, 0, 0.2, 1) infinite;
-}
-
-.radar-avatar-marker.is-guide .radar-avatar-pulse,
-.team-marker-pin.is-guide .radar-avatar-pulse {
-  background: rgba(245, 158, 11, 0.45);
-  box-shadow: 0 0 14px rgba(245, 158, 11, 0.6);
-  animation: radar-avatar-ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
 }
 
 @keyframes radar-avatar-ping {
@@ -2997,12 +2990,7 @@ body,
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5), 0 0 16px rgba(59, 130, 246, 0.65);
 }
 
-.radar-avatar-marker.is-guide .radar-avatar-ring,
-.team-marker-pin.is-guide .pin-avatar-ring {
-  border-color: var(--amber-400);
-  color: var(--amber-400);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5), 0 0 18px rgba(245, 158, 11, 0.7);
-}
+
 
 .radar-avatar-ring img,
 .pin-avatar-ring img {
@@ -3032,11 +3020,6 @@ body,
   border-top-color: #3b82f6;
 }
 
-.radar-avatar-marker.is-guide .radar-avatar-pointer,
-.team-marker-pin.is-guide .pin-anchor-pointer {
-  border-top-color: var(--amber-400);
-}
-
 /* 头像上方浮动信息泡泡 (姓名 + 距离/身份) */
 .radar-avatar-bubble,
 .pin-bubble {
@@ -3064,11 +3047,6 @@ body,
   border-color: #3b82f6;
 }
 
-.radar-avatar-marker.is-guide .radar-avatar-bubble,
-.team-marker-pin.is-guide .pin-bubble {
-  border-color: var(--amber-400);
-}
-
 .radar-avatar-bubble .pin-dist,
 .pin-bubble .pin-dist {
   color: var(--emerald-400);
@@ -3080,11 +3058,6 @@ body,
   color: #60a5fa;
   font-size: 0.68rem;
   font-weight: 700;
-}
-
-.radar-avatar-marker.is-guide .radar-avatar-bubble .pin-dist,
-.team-marker-pin.is-guide .pin-bubble .pin-dist {
-  color: var(--amber-400);
 }
 
 /* ==========================================================================
@@ -3521,11 +3494,7 @@ html[data-theme="light"] .radar-live-tracking-banner {
   object-fit: cover;
 }
 
-.radar-roster-avatar.is-guide {
-  border-color: var(--amber-400);
-  color: var(--amber-400);
-  background: rgba(245, 158, 11, 0.15);
-}
+
 
 .radar-roster-info strong {
   display: block;
@@ -3901,10 +3870,7 @@ html[data-theme="light"] .radar-avatar-marker.is-me .radar-avatar-bubble {
   border-color: #3b82f6;
 }
 
-html[data-theme="light"] .radar-avatar-marker.is-guide .radar-avatar-bubble,
-html[data-theme="light"] .team-marker-pin.is-guide .pin-bubble {
-  border-color: var(--amber-500);
-}
+
 
 html[data-theme="light"] .radar-map-canvas,
 html[data-theme="light"] #radar-fullscreen-map {
