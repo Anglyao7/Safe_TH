@@ -381,17 +381,30 @@ async function getTeamMembersList(c: any, teamCode: string): Promise<TeamMemberL
       if (list && list.keys && list.keys.length > 0) {
         const mems: TeamMemberLocation[] = [];
         for (const k of list.keys) {
+          // 彻底识别并物理清理历史游客/行者残留数据
+          if (k.name.includes(':user_guest') || k.name.includes(':guest')) {
+            kv.delete(k.name).catch(() => {});
+            continue;
+          }
           const val = await kv.get(k.name);
           if (val) {
             try {
               const loc: TeamMemberLocation = JSON.parse(val);
+              const uid = String(loc.userId || '');
+              const uname = String(loc.username || '');
+              const nick = String(loc.name || '');
+
+              if (uid.startsWith('user_guest') || uid === 'guest' || uname.startsWith('guest') || nick.startsWith('行者')) {
+                kv.delete(k.name).catch(() => {});
+                continue;
+              }
               if (now - loc.updatedAt < 20 * 60 * 1000) {
                 mems.push(loc);
               }
             } catch (e) {}
           }
         }
-        if (mems.length > 0) return mems;
+        return mems;
       }
     } catch (e) {}
   }
@@ -399,7 +412,13 @@ async function getTeamMembersList(c: any, teamCode: string): Promise<TeamMemberL
   const team = teamLocations.get(teamCode);
   const memList: TeamMemberLocation[] = [];
   if (team) {
-    for (const [, loc] of team.entries()) {
+    for (const [uid, loc] of team.entries()) {
+      const uname = String(loc.username || '');
+      const nick = String(loc.name || '');
+      if (uid.startsWith('user_guest') || uid === 'guest' || uname.startsWith('guest') || nick.startsWith('行者')) {
+        team.delete(uid);
+        continue;
+      }
       if (now - loc.updatedAt < 20 * 60 * 1000) {
         memList.push(loc);
       }
@@ -426,7 +445,7 @@ app.post('/api/auth/register', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const username = String(body.username || '').trim();
   const password = String(body.password || '').trim();
-  const name = String(body.name || '').trim() || `旅行者${username.slice(-4)}`;
+  const name = String(body.name || '').trim() || `同行成员#${username.slice(-4)}`;
   const phone = String(body.phone || '').trim();
 
   // 校验账号与密码格式
@@ -605,6 +624,12 @@ app.get('/api/system/users', async (c) => {
           if (val) {
             try {
               const u = JSON.parse(val);
+              const uName = String(u.username || '');
+              const nick = String(u.name || '');
+              if (uName.startsWith('guest') || uName === '859151' || uName === '678545' || uName === '910637' || uName === '421449' || uName === '991808' || nick.startsWith('行者')) {
+                kv.delete(k.name).catch(() => {});
+                continue;
+              }
               if (!userList.some((existing) => existing.username === u.username)) {
                 userList.push({
                   username: u.username,
@@ -620,6 +645,9 @@ app.get('/api/system/users', async (c) => {
   }
   // 检查内存中的用户并合并至列表与 KV
   for (const [, u] of users.entries()) {
+    const uName = String(u.username || '');
+    const nick = String(u.name || '');
+    if (uName.startsWith('guest') || nick.startsWith('行者')) continue;
     if (!userList.some((existing) => existing.username === u.username)) {
       userList.push({
         username: u.username,
@@ -639,13 +667,64 @@ app.get('/api/system/users', async (c) => {
   });
 });
 
+// 一键清理所有历史游客/行者残留数据接口
+app.get('/api/system/cleanup-guests', async (c) => {
+  const kv = getKV(c);
+  let deletedCount = 0;
+  if (kv) {
+    try {
+      // 1. 清理 member: 中的游客
+      const memList = await kv.list({ prefix: 'member:' });
+      if (memList && memList.keys) {
+        for (const k of memList.keys) {
+          if (k.name.includes('guest') || k.name.includes('678545') || k.name.includes('910637') || k.name.includes('421449') || k.name.includes('991808') || k.name.includes('859151')) {
+            await kv.delete(k.name);
+            deletedCount++;
+          }
+        }
+      }
+      // 2. 清理 user: 中的游客
+      const uList = await kv.list({ prefix: 'user:' });
+      if (uList && uList.keys) {
+        for (const k of uList.keys) {
+          if (k.name.includes('guest') || k.name.includes('678545') || k.name.includes('910637') || k.name.includes('421449') || k.name.includes('991808') || k.name.includes('859151')) {
+            await kv.delete(k.name);
+            deletedCount++;
+          }
+        }
+      }
+      // 3. 清理 track: 中的游客
+      const tList = await kv.list({ prefix: 'track:' });
+      if (tList && tList.keys) {
+        for (const k of tList.keys) {
+          if (k.name.includes('guest') || k.name.includes('678545') || k.name.includes('910637') || k.name.includes('421449') || k.name.includes('991808') || k.name.includes('859151')) {
+            await kv.delete(k.name);
+            deletedCount++;
+          }
+        }
+      }
+    } catch (e) {}
+  }
+  // 清空内存中的旧小队位置
+  teamLocations.clear();
+  return c.json({ success: true, message: `已彻底清理 ${deletedCount} 条历史游客与行者残留记录` });
+});
+
 // ============================================================================
 // 4. 多人小队实时位置共享与雷达接口
 // ============================================================================
 app.post('/api/team/location', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const teamCode = body.teamCode ? String(body.teamCode).trim() : '';
-  const userId = String(body.userId || 'guest').trim();
+  const userId = String(body.userId || '').trim();
+  const username = String(body.username || '').trim();
+  const name = String(body.name || '').trim();
+
+  // 严格安全策略：完全剔除游客与行者身份，未登录绝不记录/上报定位
+  if (!userId || userId === 'guest' || userId.startsWith('user_guest') || !username || username.startsWith('guest') || name.startsWith('行者')) {
+    return c.json({ success: false, message: '未登录状态不可上报或同步定位，请先登录账号' }, 401);
+  }
+
   const lat = Number(body.lat);
   const lng = Number(body.lng);
 

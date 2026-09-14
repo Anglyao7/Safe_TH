@@ -184,9 +184,14 @@
     updateAllViews();
     fetchBackendHealth();
 
-    // 优先尝试高德/浏览器高精度定位，同时并发进行网络IP对齐
-    requestGeolocation(false);
-    fetchIpLocationFallback();
+    // 仅在已登录状态下才触发高精度定位与 IP 对齐；未登录状态绝不定位
+    const isLoggedIn = Boolean(state.token && state.user && state.user.id && !state.user.id.startsWith('user_guest'));
+    if (isLoggedIn) {
+      requestGeolocation(false);
+      fetchIpLocationFallback();
+    } else {
+      updateLocationUI();
+    }
   });
 
   function initIcons() {
@@ -213,17 +218,49 @@
         }
       }
 
-      const savedLoc = localStorage.getItem(STORAGE_KEYS.LAST_LOCATION);
-      if (savedLoc) {
-        const parsedLoc = JSON.parse(savedLoc);
-        state.location = { ...state.location, ...parsedLoc };
-      }
-
       const savedToken = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
       const savedUser = localStorage.getItem(STORAGE_KEYS.AUTH_USER);
       if (savedToken && savedUser) {
-        state.token = savedToken;
-        state.user = JSON.parse(savedUser);
+        try {
+          const parsedUser = JSON.parse(savedUser);
+          if (parsedUser && parsedUser.id && !parsedUser.id.startsWith('user_guest') && !(parsedUser.name && parsedUser.name.startsWith('行者'))) {
+            state.token = savedToken;
+            state.user = parsedUser;
+          } else {
+            state.token = null;
+            state.user = null;
+            localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
+            localStorage.removeItem(STORAGE_KEYS.AUTH_USER);
+          }
+        } catch (e) {
+          state.token = null;
+          state.user = null;
+        }
+      } else {
+        state.token = null;
+        state.user = null;
+      }
+
+      // 未登录状态绝对不恢复历史定位，实现“未登录就没有定位”
+      const isLoggedIn = Boolean(state.token && state.user && state.user.id && !state.user.id.startsWith('user_guest'));
+      if (isLoggedIn) {
+        const savedLoc = localStorage.getItem(STORAGE_KEYS.LAST_LOCATION);
+        if (savedLoc) {
+          const parsedLoc = JSON.parse(savedLoc);
+          state.location = { ...state.location, ...parsedLoc };
+        }
+      } else {
+        state.location = {
+          lat: null,
+          lng: null,
+          accuracy: null,
+          updated: null,
+          granted: false,
+          city: '',
+        };
+        try {
+          localStorage.removeItem(STORAGE_KEYS.LAST_LOCATION);
+        } catch (e) {}
       }
 
       const savedTeam = localStorage.getItem(STORAGE_KEYS.TEAM_CODE);
@@ -434,7 +471,12 @@
       iconAnchor: [11, 11],
     });
 
-    state.marker = L.marker([disp.lat, disp.lng], { icon: pulseIcon }).addTo(state.map);
+    const isLoggedIn = Boolean(state.token && state.user && state.user.id && !state.user.id.startsWith('user_guest'));
+    if (isLoggedIn && state.location.granted && state.location.lat !== null) {
+      state.marker = L.marker([disp.lat, disp.lng], { icon: pulseIcon }).addTo(state.map);
+    } else {
+      state.marker = null;
+    }
 
     // 定位主切换按钮与状态指示胶囊
     const toggleBtn = document.getElementById('location-toggle');
@@ -843,6 +885,9 @@
   }
 
   function fetchIpLocationFallback() {
+    const isLoggedIn = Boolean(state.token && state.user && state.user.id && !state.user.id.startsWith('user_guest'));
+    if (!isLoggedIn) return;
+
     fetch('/api/geo')
       .then((res) => res.json())
       .then((data) => {
@@ -868,6 +913,17 @@
   }
 
   function requestGeolocation(manualTrigger = false) {
+    const isLoggedIn = Boolean(state.token && state.user && state.user.id && !state.user.id.startsWith('user_guest'));
+    if (!isLoggedIn) {
+      if (manualTrigger) {
+        showToast('未登录状态不开放定位，请先登录或注册账号', 'warning');
+        const authModal = document.getElementById('auth-modal');
+        authModal?.removeAttribute('hidden');
+      }
+      updateLocationUI();
+      return;
+    }
+
     const stateEl = document.getElementById('location-state');
     const topText = document.getElementById('top-location-text');
 
@@ -910,13 +966,6 @@
     const checkLocIcon = document.querySelector('[data-check="location"]');
     const settingsLocState = document.getElementById('settings-location-state');
 
-    const hasCoords = state.location.lat !== null;
-
-    if (latEl) latEl.textContent = hasCoords ? state.location.lat : '--';
-    if (lngEl) lngEl.textContent = hasCoords ? state.location.lng : '--';
-    if (accEl) accEl.textContent = hasCoords ? `±${state.location.accuracy} 米` : '--';
-    if (updatedEl) updatedEl.textContent = state.location.updated || '尚未获取';
-
     const radarLat = document.getElementById('radar-stat-lat');
     const radarLng = document.getElementById('radar-stat-lng');
     const radarAcc = document.getElementById('radar-stat-acc');
@@ -924,6 +973,49 @@
     const radarAddrBox = document.getElementById('radar-stat-addr-box');
     const radarAddrText = document.getElementById('radar-stat-addr');
     const radarAddrDivider = document.getElementById('radar-stat-addr-divider');
+
+    const isLoggedIn = Boolean(state.token && state.user && state.user.id && !state.user.id.startsWith('user_guest'));
+
+    // 未登录完全无定位处理
+    if (!isLoggedIn) {
+      if (latEl) latEl.textContent = '--';
+      if (lngEl) lngEl.textContent = '--';
+      if (accEl) accEl.textContent = '--';
+      if (updatedEl) updatedEl.textContent = '未登录';
+      if (radarLat) radarLat.textContent = '--';
+      if (radarLng) radarLng.textContent = '--';
+      if (radarAcc) radarAcc.textContent = '--';
+      if (radarGpsStatusText) radarGpsStatusText.textContent = '未登录 · 定位未开启';
+      if (radarAddrBox) radarAddrBox.style.display = 'none';
+      if (radarAddrDivider) radarAddrDivider.style.display = 'none';
+      if (stateEl) stateEl.innerHTML = '<span class="status-dot status-dot-warn"></span><span>未登录（点击顶栏登录后开启定位）</span>';
+      if (topText) topText.textContent = '未登录 · 无定位';
+      if (topDot) topDot.className = 'status-dot status-dot-warn';
+      if (pill) pill.classList.remove('active');
+      if (checkLocText) checkLocText.textContent = '未登录';
+      if (checkLocIcon) checkLocIcon.innerHTML = '<i data-lucide="circle"></i>';
+      if (settingsLocState) {
+        settingsLocState.className = 'status-badge-neutral';
+        settingsLocState.textContent = '未登录账号 (登录后开启定位)';
+      }
+      if (state.marker && state.map) {
+        state.map.removeLayer(state.marker);
+        state.marker = null;
+      }
+      if (state.radarMarker && state.radarMap) {
+        state.radarMap.removeLayer(state.radarMarker);
+        state.radarMarker = null;
+      }
+      initIcons();
+      return;
+    }
+
+    const hasCoords = state.location.lat !== null;
+
+    if (latEl) latEl.textContent = hasCoords ? state.location.lat : '--';
+    if (lngEl) lngEl.textContent = hasCoords ? state.location.lng : '--';
+    if (accEl) accEl.textContent = hasCoords ? `±${state.location.accuracy} 米` : '--';
+    if (updatedEl) updatedEl.textContent = state.location.updated || '尚未获取';
 
     if (radarLat) radarLat.textContent = hasCoords ? state.location.lat : DEFAULT_BANGKOK.lat;
     if (radarLng) radarLng.textContent = hasCoords ? state.location.lng : DEFAULT_BANGKOK.lng;
@@ -1512,16 +1604,15 @@ ${googleMapUrl}
     bindPasswordToggle('toggle-reg-pwd-btn', 'reg-password');
     bindPasswordToggle('toggle-reg-confirm-pwd-btn', 'reg-confirm-password');
 
-    // 若无登录用户，生成临时数字访客
-    if (!state.user) {
-      const randomNum = String(Math.floor(100000 + Math.random() * 900000));
-      state.user = {
-        id: `user_guest_${randomNum}`,
-        username: randomNum,
-        name: state.profile.name || `行者${randomNum.slice(-3)}`,
-        avatar: state.profile.avatar || '',
-        phone: state.profile.phone || randomNum,
-      };
+    // 彻底清除临时访客/行者历史残留（未登录用户保持 null）
+    if (state.user && state.user.id && (state.user.id.startsWith('user_guest') || (state.user.name && state.user.name.startsWith('行者')))) {
+      state.user = null;
+      state.token = null;
+      try {
+        localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
+        localStorage.removeItem(STORAGE_KEYS.AUTH_USER);
+        localStorage.removeItem(STORAGE_KEYS.LAST_LOCATION);
+      } catch (e) {}
     }
 
     updateAuthUI();
@@ -1697,8 +1788,14 @@ ${googleMapUrl}
           authModal?.setAttribute('hidden', '');
           updateAuthUI();
           updateAllViews();
+
+          // 登录成功后正式开启高精定位与位置上报
+          requestGeolocation(false);
+          fetchIpLocationFallback();
           reportMyLocation();
-          showToast(`登录成功！欢迎同行者【${data.user.name || data.user.username}】`);
+          fetchTeamMembers();
+
+          showToast(`登录成功！欢迎同行成员【${data.user.name || data.user.username}】`);
         } else {
           showToast(data.message || '登录失败，请检查账号密码', 'error');
         }
@@ -1752,7 +1849,13 @@ ${googleMapUrl}
           authModal?.setAttribute('hidden', '');
           updateAuthUI();
           updateAllViews();
+
+          // 注册成功后正式开启高精定位与位置上报
+          requestGeolocation(false);
+          fetchIpLocationFallback();
           reportMyLocation();
+          fetchTeamMembers();
+
           showToast(`🎉 注册成功！欢迎加入同行小队：【${data.user.name}】`);
         } else {
           showToast(data.message || '注册失败，请稍后重试', 'error');
@@ -1785,27 +1888,37 @@ ${googleMapUrl}
 
     // 本地清除登录态
     state.token = null;
+    state.user = null;
     try {
       localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
       localStorage.removeItem(STORAGE_KEYS.AUTH_USER);
+      localStorage.removeItem(STORAGE_KEYS.LAST_LOCATION);
     } catch (e) {}
 
-    // 重置为临时访客
-    const randomNum = String(Math.floor(100000 + Math.random() * 900000));
-    state.user = {
-      id: `user_guest_${randomNum}`,
-      username: randomNum,
-      name: `行者${randomNum.slice(-3)}`,
-      avatar: '',
-      phone: '',
+    // 未登录彻底清除定位数据与地图标点，未登录无定位
+    state.location = {
+      lat: null,
+      lng: null,
+      accuracy: null,
+      updated: null,
+      granted: false,
+      city: '',
     };
+    if (state.marker && state.map) {
+      state.map.removeLayer(state.marker);
+      state.marker = null;
+    }
+    if (state.radarMarker && state.radarMap) {
+      state.radarMap.removeLayer(state.radarMarker);
+      state.radarMarker = null;
+    }
 
     userCenterModal?.setAttribute('hidden', '');
     updateAuthUI();
+    updateLocationUI();
     updateAllViews();
-    reportMyLocation();
 
-    showToast('已安全退出当前账号，进入访客守护模式');
+    showToast('已安全退出当前账号，未登录状态下不开启定位与共享');
   }
 
   function updateUserCenterUI() {
@@ -1904,8 +2017,17 @@ ${googleMapUrl}
 
   function updateMyRadarMarker() {
     if (!state.radarMap || !window.L) return;
-    const myLat = state.location.lat || DEFAULT_BANGKOK.lat;
-    const myLng = state.location.lng || DEFAULT_BANGKOK.lng;
+    const isLoggedIn = Boolean(state.token && state.user && state.user.id && !state.user.id.startsWith('user_guest'));
+    if (!isLoggedIn || !state.location.granted || state.location.lat === null || state.location.lng === null) {
+      if (state.radarMarker) {
+        state.radarMap.removeLayer(state.radarMarker);
+        state.radarMarker = null;
+      }
+      return;
+    }
+
+    const myLat = state.location.lat;
+    const myLng = state.location.lng;
     const disp = toMapCoordinate(myLat, myLng);
 
     const icon = createMyRadarIcon();
@@ -1958,14 +2080,24 @@ ${googleMapUrl}
     // 加载纯净无水印底图
     state.radarTileLayer = createTileLayer(state.currentMapSource).addTo(state.radarMap);
 
-    updateMyRadarMarker();
+    const isLoggedIn = Boolean(state.token && state.user && state.user.id && !state.user.id.startsWith('user_guest'));
+    if (isLoggedIn && state.location.granted) {
+      updateMyRadarMarker();
+    }
 
     // 绑定雷达工具栏操作
     const locateMeBtn = document.getElementById('radar-locate-me-btn');
     if (locateMeBtn) {
       locateMeBtn.addEventListener('click', () => {
-        const myLat = state.location.lat || DEFAULT_BANGKOK.lat;
-        const myLng = state.location.lng || DEFAULT_BANGKOK.lng;
+        const isLogged = Boolean(state.token && state.user && state.user.id && !state.user.id.startsWith('user_guest'));
+        if (!isLogged || !state.location.granted || state.location.lat === null) {
+          showToast('未登录状态无定位数据，请先登录账号', 'warning');
+          const authModal = document.getElementById('auth-modal');
+          authModal?.removeAttribute('hidden');
+          return;
+        }
+        const myLat = state.location.lat;
+        const myLng = state.location.lng;
         const targetDisp = toMapCoordinate(myLat, myLng);
         state.radarMap?.flyTo([targetDisp.lat, targetDisp.lng], 15);
         showToast('已聚焦至我的当前位置');
@@ -1975,9 +2107,17 @@ ${googleMapUrl}
     // 绑定定位微调校准功能
     const calibrateBtn = document.getElementById('radar-calibrate-btn');
     const calibrateBtnText = document.getElementById('radar-calibrate-btn-text');
+    let isCalibrating = false;
 
     if (calibrateBtn) {
       calibrateBtn.addEventListener('click', () => {
+        const isLogged = Boolean(state.token && state.user && state.user.id && !state.user.id.startsWith('user_guest'));
+        if (!isLogged || !state.location.granted) {
+          showToast('未登录状态无法校准定位，请先登录账号', 'warning');
+          const authModal = document.getElementById('auth-modal');
+          authModal?.removeAttribute('hidden');
+          return;
+        }
         isCalibrating = !isCalibrating;
         if (isCalibrating) {
           calibrateBtn.classList.remove('button-outline');
@@ -2544,7 +2684,9 @@ ${googleMapUrl}
   }
 
   function reportMyLocation() {
-    if (!state.user) return;
+    const isLoggedIn = Boolean(state.token && state.user && state.user.id && !state.user.id.startsWith('user_guest'));
+    if (!isLoggedIn) return;
+
     // 如果尚未获取到有效定位（仍处于未授权或 null），不要向小队上报虚假的曼谷坐标！
     if (state.location.lat === null || state.location.lng === null || !state.location.granted) {
       return;
@@ -2559,7 +2701,7 @@ ${googleMapUrl}
         teamCode: state.teamCode,
         userId: state.user.id,
         username: state.user.username,
-        name: state.profile.name || state.user.name || `行者#${state.user.username.slice(-4)}`,
+        name: state.profile.name || state.user.name || (state.user.username ? `队友#${state.user.username.slice(-4)}` : '队友'),
         avatar: state.profile.avatar || state.user.avatar || '',
         phone: state.profile.phone || state.user.phone || '',
         lat,
@@ -2610,7 +2752,14 @@ ${googleMapUrl}
           return;
         }
         if (Array.isArray(data.members)) {
-          state.teamMembers = data.members;
+          // 严格剔除历史游客与行者身份
+          state.teamMembers = data.members.filter((m) => {
+            if (!m || !m.userId) return false;
+            const uid = String(m.userId);
+            const uname = String(m.username || '');
+            const nick = String(m.name || '');
+            return !uid.startsWith('user_guest') && uid !== 'guest' && !uname.startsWith('guest') && !nick.startsWith('行者');
+          });
           state.roomOwnerId = data.ownerId || '';
           state.roomOwnerName = data.ownerName || '';
           state.isRoomOwner = !!(state.user && state.roomOwnerId && state.roomOwnerId === state.user.id);
