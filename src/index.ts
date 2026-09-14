@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 
 type Bindings = {
   ASSETS?: Fetcher;
+  SAFETY_KV?: KVNamespace;
 };
 
 const app = new Hono<{ Bindings: Bindings }>();
@@ -117,6 +118,176 @@ app.get('/api/emergency-contacts', (c) => {
 });
 
 // ============================================================================
+// 2.5 全球持久化存储适配层：优先接入 Cloudflare KV，无 KV 绑定时优雅降级至内存 Map
+// ============================================================================
+async function findUser(c: any, username: string): Promise<User | null> {
+  if (c.env?.SAFETY_KV) {
+    try {
+      const data = await c.env.SAFETY_KV.get(`user:${username}`);
+      if (data) return JSON.parse(data);
+    } catch (e) {
+      console.warn('KV read user error:', e);
+    }
+  }
+  return users.get(username) || null;
+}
+
+async function persistUser(c: any, user: User): Promise<void> {
+  users.set(user.username, user);
+  if (c.env?.SAFETY_KV) {
+    try {
+      await c.env.SAFETY_KV.put(`user:${user.username}`, JSON.stringify(user));
+      await c.env.SAFETY_KV.put(`user_id:${user.id}`, JSON.stringify(user));
+    } catch (e) {
+      console.warn('KV put user error:', e);
+    }
+  }
+}
+
+async function findSession(c: any, token: string): Promise<string | null> {
+  if (c.env?.SAFETY_KV) {
+    try {
+      const username = await c.env.SAFETY_KV.get(`session:${token}`);
+      if (username) return username;
+    } catch (e) {
+      console.warn('KV read session error:', e);
+    }
+  }
+  return sessions.get(token) || null;
+}
+
+async function persistSession(c: any, token: string, username: string): Promise<void> {
+  sessions.set(token, username);
+  if (c.env?.SAFETY_KV) {
+    try {
+      await c.env.SAFETY_KV.put(`session:${token}`, username, { expirationTtl: 86400 * 30 });
+    } catch (e) {
+      console.warn('KV put session error:', e);
+    }
+  }
+}
+
+async function removeSession(c: any, token: string): Promise<void> {
+  sessions.delete(token);
+  if (c.env?.SAFETY_KV) {
+    try {
+      await c.env.SAFETY_KV.delete(`session:${token}`);
+    } catch (e) {}
+  }
+}
+
+async function findRoom(c: any, teamCode: string): Promise<TeamRoom | null> {
+  if (c.env?.SAFETY_KV) {
+    try {
+      const data = await c.env.SAFETY_KV.get(`room:${teamCode}`);
+      if (data) {
+        const parsed = JSON.parse(data);
+        const room: TeamRoom = {
+          code: parsed.code,
+          ownerId: parsed.ownerId,
+          ownerName: parsed.ownerName,
+          createdAt: parsed.createdAt,
+          kickedUserIds: new Set(parsed.kickedUserIds || []),
+          disbanded: parsed.disbanded || false,
+        };
+        teamRooms.set(teamCode, room);
+        return room;
+      }
+    } catch (e) {}
+  }
+  return teamRooms.get(teamCode) || null;
+}
+
+async function persistRoom(c: any, room: TeamRoom): Promise<void> {
+  teamRooms.set(room.code, room);
+  if (c.env?.SAFETY_KV) {
+    try {
+      const raw = {
+        code: room.code,
+        ownerId: room.ownerId,
+        ownerName: room.ownerName,
+        createdAt: room.createdAt,
+        kickedUserIds: Array.from(room.kickedUserIds),
+        disbanded: room.disbanded || false,
+      };
+      await c.env.SAFETY_KV.put(`room:${room.code}`, JSON.stringify(raw), { expirationTtl: 86400 * 14 });
+    } catch (e) {}
+  }
+}
+
+async function removeRoom(c: any, teamCode: string): Promise<void> {
+  teamRooms.delete(teamCode);
+  teamLocations.delete(teamCode);
+  if (c.env?.SAFETY_KV) {
+    try {
+      await c.env.SAFETY_KV.delete(`room:${teamCode}`);
+    } catch (e) {}
+  }
+}
+
+async function persistMemberLocation(c: any, teamCode: string, memberLoc: TeamMemberLocation): Promise<void> {
+  let team = teamLocations.get(teamCode);
+  if (!team) {
+    team = new Map();
+    teamLocations.set(teamCode, team);
+  }
+  team.set(memberLoc.userId, memberLoc);
+
+  if (c.env?.SAFETY_KV) {
+    try {
+      await c.env.SAFETY_KV.put(`member:${teamCode}:${memberLoc.userId}`, JSON.stringify(memberLoc), { expirationTtl: 1800 });
+      await c.env.SAFETY_KV.put(`track:${memberLoc.username}`, JSON.stringify({ ...memberLoc, teamCode }), { expirationTtl: 86400 * 3 });
+      await c.env.SAFETY_KV.put(`track:${memberLoc.userId}`, JSON.stringify({ ...memberLoc, teamCode }), { expirationTtl: 86400 * 3 });
+    } catch (e) {}
+  }
+}
+
+async function getTeamMembersList(c: any, teamCode: string): Promise<TeamMemberLocation[]> {
+  const now = Date.now();
+  if (c.env?.SAFETY_KV) {
+    try {
+      const list = await c.env.SAFETY_KV.list({ prefix: `member:${teamCode}:` });
+      if (list && list.keys && list.keys.length > 0) {
+        const mems: TeamMemberLocation[] = [];
+        for (const k of list.keys) {
+          const val = await c.env.SAFETY_KV.get(k.name);
+          if (val) {
+            try {
+              const loc: TeamMemberLocation = JSON.parse(val);
+              if (now - loc.updatedAt < 20 * 60 * 1000) {
+                mems.push(loc);
+              }
+            } catch (e) {}
+          }
+        }
+        if (mems.length > 0) return mems;
+      }
+    } catch (e) {}
+  }
+
+  const team = teamLocations.get(teamCode);
+  const memList: TeamMemberLocation[] = [];
+  if (team) {
+    for (const [, loc] of team.entries()) {
+      if (now - loc.updatedAt < 20 * 60 * 1000) {
+        memList.push(loc);
+      }
+    }
+  }
+  return memList;
+}
+
+async function removeMemberFromTeam(c: any, teamCode: string, userId: string): Promise<void> {
+  const team = teamLocations.get(teamCode);
+  if (team) team.delete(userId);
+  if (c.env?.SAFETY_KV) {
+    try {
+      await c.env.SAFETY_KV.delete(`member:${teamCode}:${userId}`);
+    } catch (e) {}
+  }
+}
+
+// ============================================================================
 // 3. 极简纯数字账号注册与登录
 // ============================================================================
 app.post('/api/auth/register', async (c) => {
@@ -134,7 +305,8 @@ app.post('/api/auth/register', async (c) => {
     return c.json({ success: false, message: '密码长度至少需3位字符' }, 400);
   }
 
-  if (users.has(username)) {
+  const existingUser = await findUser(c, username);
+  if (existingUser) {
     return c.json({ success: false, message: '该账号已被注册，可直接切换至“登录”' }, 400);
   }
 
@@ -147,9 +319,9 @@ app.post('/api/auth/register', async (c) => {
     phone: phone || username,
   };
 
-  users.set(username, user);
+  await persistUser(c, user);
   const token = `token_${username}_${Date.now()}`;
-  sessions.set(token, username);
+  await persistSession(c, token, username);
 
   return c.json({
     success: true,
@@ -174,7 +346,7 @@ app.post('/api/auth/login', async (c) => {
     return c.json({ success: false, message: '请输入账号和密码' }, 400);
   }
 
-  let user = users.get(username);
+  let user = await findUser(c, username);
   if (!user) {
     return c.json({ success: false, message: '账号不存在，请核对或切换至上方“注册新账号”' }, 404);
   }
@@ -184,7 +356,7 @@ app.post('/api/auth/login', async (c) => {
   }
 
   const token = `token_${username}_${Date.now()}`;
-  sessions.set(token, username);
+  await persistSession(c, token, username);
 
   return c.json({
     success: true,
@@ -204,21 +376,25 @@ app.post('/api/auth/logout', async (c) => {
   const authHeader = c.req.header('Authorization') || '';
   const token = authHeader.replace(/^Bearer\s+/i, '');
   if (token) {
-    sessions.delete(token);
+    await removeSession(c, token);
   }
   return c.json({ success: true, message: '已安全退出登录' });
 });
 
-app.get('/api/auth/me', (c) => {
+app.get('/api/auth/me', async (c) => {
   const authHeader = c.req.header('Authorization') || '';
   const token = authHeader.replace(/^Bearer\s+/i, '');
-  const username = sessions.get(token);
+  const username = await findSession(c, token);
 
-  if (!username || !users.has(username)) {
+  if (!username) {
     return c.json({ loggedIn: false }, 401);
   }
 
-  const user = users.get(username)!;
+  const user = await findUser(c, username);
+  if (!user) {
+    return c.json({ loggedIn: false }, 401);
+  }
+
   return c.json({
     loggedIn: true,
     user: {
@@ -277,7 +453,7 @@ app.post('/api/team/location', async (c) => {
   }
 
   // 小队房间及生命周期判断
-  let room = teamRooms.get(teamCode);
+  let room = await findRoom(c, teamCode);
   if (!room) {
     room = {
       code: teamCode,
@@ -286,7 +462,7 @@ app.post('/api/team/location', async (c) => {
       createdAt: Date.now(),
       kickedUserIds: new Set<string>(),
     };
-    teamRooms.set(teamCode, room);
+    await persistRoom(c, room);
   } else {
     // 检查房间是否已被解散
     if (room.disbanded) {
@@ -307,18 +483,13 @@ app.post('/api/team/location', async (c) => {
     }
   }
 
-  let team = teamLocations.get(teamCode);
-  if (!team) {
-    team = new Map();
-    teamLocations.set(teamCode, team);
-  }
-
-  team.set(userId, memberLoc);
+  await persistMemberLocation(c, teamCode, memberLoc);
+  const activeMembers = await getTeamMembersList(c, teamCode);
 
   return c.json({
     success: true,
     teamCode,
-    activeCount: team.size,
+    activeCount: activeMembers.length,
     ownerId: room.ownerId,
     ownerName: room.ownerName,
   });
@@ -327,22 +498,31 @@ app.post('/api/team/location', async (c) => {
 // ============================================================================
 // 4.1 单人专属实时位置动态追踪接口 (公开只读，供外部/亲友实时查看最新位置)
 // ============================================================================
-app.get('/api/track/:identifier', (c) => {
+app.get('/api/track/:identifier', async (c) => {
   const identifier = String(c.req.param('identifier') || '').trim();
-  return handleTrackingLookup(c, identifier);
+  return await handleTrackingLookup(c, identifier);
 });
 
-app.get('/api/track', (c) => {
+app.get('/api/track', async (c) => {
   const identifier = String(c.req.query('username') || c.req.query('user') || '').trim();
-  return handleTrackingLookup(c, identifier);
+  return await handleTrackingLookup(c, identifier);
 });
 
-function handleTrackingLookup(c: any, identifier: string) {
+async function handleTrackingLookup(c: any, identifier: string) {
   if (!identifier) {
     return c.json({ success: false, message: '请提供待追踪的用户名或用户ID' }, 400);
   }
 
   let loc = userLatestLocations.get(identifier);
+
+  if (!loc && c.env?.SAFETY_KV) {
+    try {
+      const data = await c.env.SAFETY_KV.get(`track:${identifier}`);
+      if (data) {
+        loc = JSON.parse(data);
+      }
+    } catch (e) {}
+  }
 
   if (!loc) {
     for (const [tCode, teamMap] of teamLocations.entries()) {
@@ -395,7 +575,7 @@ function handleTrackingLookup(c: any, identifier: string) {
   });
 }
 
-app.get('/api/team/members', (c) => {
+app.get('/api/team/members', async (c) => {
   const teamCode = String(c.req.query('teamCode') || '').trim();
   const reqUserId = String(c.req.query('userId') || '').trim();
 
@@ -409,7 +589,7 @@ app.get('/api/team/members', (c) => {
     });
   }
 
-  const room = teamRooms.get(teamCode);
+  const room = await findRoom(c, teamCode);
   if (room && room.disbanded) {
     return c.json({
       teamCode,
@@ -434,26 +614,7 @@ app.get('/api/team/members', (c) => {
     });
   }
 
-  const team = teamLocations.get(teamCode);
-  if (!team) {
-    return c.json({
-      teamCode,
-      ownerId: room ? room.ownerId : '',
-      ownerName: room ? room.ownerName : '',
-      activeCount: 0,
-      members: [],
-    });
-  }
-
-  // 过滤掉超过 20 分钟未更新心跳的离线用户
-  const now = Date.now();
-  const memberList: TeamMemberLocation[] = [];
-
-  for (const [, loc] of team.entries()) {
-    if (now - loc.updatedAt < 20 * 60 * 1000) {
-      memberList.push(loc);
-    }
-  }
+  const memberList = await getTeamMembersList(c, teamCode);
 
   // 房主在线维护：如果原房主离线且有其它活跃成员，顺位转让房主
   if (room && memberList.length > 0) {
@@ -461,6 +622,7 @@ app.get('/api/team/members', (c) => {
     if (!ownerActive) {
       room.ownerId = memberList[0].userId;
       room.ownerName = memberList[0].name;
+      await persistRoom(c, room);
     }
   }
 
@@ -485,29 +647,24 @@ app.post('/api/team/leave', async (c) => {
     return c.json({ success: false, message: '缺少必要参数 (teamCode, userId)' }, 400);
   }
 
-  const team = teamLocations.get(teamCode);
-  if (team) {
-    team.delete(userId);
-  }
+  await removeMemberFromTeam(c, teamCode, userId);
 
   const userLoc = userLatestLocations.get(userId);
   if (userLoc && userLoc.teamCode === teamCode) {
     delete userLoc.teamCode;
   }
 
-  const room = teamRooms.get(teamCode);
+  const room = await findRoom(c, teamCode);
   if (room && room.ownerId === userId) {
     // 房主退出：若还有其他队员，自动移交房主给下一位
-    if (team && team.size > 0) {
-      const nextMember = team.values().next().value;
-      if (nextMember) {
-        room.ownerId = nextMember.userId;
-        room.ownerName = nextMember.name;
-      }
+    const remaining = await getTeamMembersList(c, teamCode);
+    if (remaining.length > 0) {
+      room.ownerId = remaining[0].userId;
+      room.ownerName = remaining[0].name;
+      await persistRoom(c, room);
     } else {
       // 房间已空，回收
-      teamRooms.delete(teamCode);
-      teamLocations.delete(teamCode);
+      await removeRoom(c, teamCode);
     }
   }
 
@@ -530,7 +687,7 @@ app.post('/api/team/kick', async (c) => {
     return c.json({ success: false, message: '缺少必要参数' }, 400);
   }
 
-  const room = teamRooms.get(teamCode);
+  const room = await findRoom(c, teamCode);
   if (room && room.ownerId && room.ownerId !== operatorUserId) {
     return c.json({ success: false, message: '只有房主/创建者有权移出队员' }, 403);
   }
@@ -539,13 +696,11 @@ app.post('/api/team/kick', async (c) => {
     return c.json({ success: false, message: '房主不能将自己踢出，如需离开请选择“解散小队”或“退出小队”' }, 400);
   }
 
-  const team = teamLocations.get(teamCode);
-  if (team) {
-    team.delete(targetUserId);
-  }
+  await removeMemberFromTeam(c, teamCode, targetUserId);
 
   if (room) {
     room.kickedUserIds.add(targetUserId);
+    await persistRoom(c, room);
   }
 
   const userLoc = userLatestLocations.get(targetUserId);
@@ -572,17 +727,18 @@ app.post('/api/team/disband', async (c) => {
     return c.json({ success: false, message: '缺少必要参数' }, 400);
   }
 
-  const room = teamRooms.get(teamCode);
+  const room = await findRoom(c, teamCode);
   if (room && room.ownerId && room.ownerId !== operatorUserId) {
     return c.json({ success: false, message: '只有房主/创建者有权解散该小队房间' }, 403);
   }
 
   if (room) {
     room.disbanded = true;
+    await persistRoom(c, room);
   }
 
-  // 清空房间位置数据
-  teamLocations.delete(teamCode);
+  // 清空房间及位置数据
+  await removeRoom(c, teamCode);
 
   return c.json({
     success: true,
@@ -618,6 +774,15 @@ app.post('/api/upload', async (c) => {
       filename,
     });
 
+    if (c.env?.SAFETY_KV) {
+      try {
+        await c.env.SAFETY_KV.put(`img:${imageId}`, arrayBuffer, {
+          metadata: { mimeType, filename },
+          expirationTtl: 86400 * 30,
+        });
+      } catch (e) {}
+    }
+
     return c.json({
       success: true,
       message: '图片上传成功',
@@ -632,22 +797,40 @@ app.post('/api/upload', async (c) => {
   }
 });
 
-app.get('/api/images/:id', (c) => {
+app.get('/api/images/:id', async (c) => {
   const id = c.req.param('id');
   const img = storedImages.get(id);
 
-  if (!img) {
-    return c.text('Image Not Found', 404);
+  if (img) {
+    return new Response(img.data, {
+      status: 200,
+      headers: {
+        'Content-Type': img.mimeType,
+        'Cache-Control': 'public, max-age=86400',
+        'Content-Disposition': `inline; filename="${img.filename}"`,
+      },
+    });
   }
 
-  return new Response(img.data, {
-    status: 200,
-    headers: {
-      'Content-Type': img.mimeType,
-      'Cache-Control': 'public, max-age=86400',
-      'Content-Disposition': `inline; filename="${img.filename}"`,
-    },
-  });
+  if (c.env?.SAFETY_KV) {
+    try {
+      const kvResult = await c.env.SAFETY_KV.getWithMetadata<{ mimeType?: string; filename?: string }>(`img:${id}`, 'arrayBuffer');
+      if (kvResult && kvResult.value) {
+        const mimeType = kvResult.metadata?.mimeType || 'image/jpeg';
+        const filename = kvResult.metadata?.filename || `${id}.jpg`;
+        return new Response(kvResult.value, {
+          status: 200,
+          headers: {
+            'Content-Type': mimeType,
+            'Cache-Control': 'public, max-age=86400',
+            'Content-Disposition': `inline; filename="${filename}"`,
+          },
+        });
+      }
+    } catch (e) {}
+  }
+
+  return c.text('Image Not Found', 404);
 });
 
 // ============================================================================

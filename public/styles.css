@@ -2363,8 +2363,18 @@ body {
 }
 
 /* ==========================================================================
-   Responsive Breakpoints
+   Responsive Breakpoints & Mobile Touch Optimization
    ========================================================================== */
+
+/* 全局移动端触控手势防抖与点击高亮清除 */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button, a, input, select, textarea {
+  touch-action: manipulation;
+}
+
 @media (max-width: 1080px) {
   .overview-hero-grid,
   .overview-content-grid,
@@ -2392,22 +2402,103 @@ body {
 
   .mobile-dock {
     display: flex;
+    padding-bottom: max(6px, env(safe-area-inset-bottom));
+    height: calc(64px + env(safe-area-inset-bottom));
   }
 
   .app-view {
-    padding: 1.25rem;
-    padding-bottom: 80px;
+    padding: 1rem;
+    padding-bottom: calc(84px + env(safe-area-inset-bottom));
   }
 
   .topbar {
-    padding: 0 1.25rem;
+    padding: 0 1rem;
+    padding-top: max(0px, env(safe-area-inset-top));
+  }
+
+  .toast-container {
+    bottom: calc(76px + env(safe-area-inset-bottom));
+    right: 1rem;
+    left: 1rem;
+    align-items: center;
+  }
+
+  .toast {
+    max-width: 100%;
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 768px) {
+  /* 顶栏精简，防止挤爆 */
+  .topbar {
+    height: 56px;
+  }
+
+  .topbar-actions {
+    gap: 0.5rem;
+  }
+
+  .user-pill {
+    padding: 3px 8px 3px 3px;
+    font-size: 0.76rem;
+  }
+
+  .user-pill-avatar {
+    width: 24px;
+    height: 24px;
+    font-size: 0.72rem;
+  }
+
+  /* 地图高度在平板/手机上更合理 */
+  .radar-map-wrapper {
+    min-height: 400px;
+    height: calc(100vh - 300px);
+  }
+
+  #radar-fullscreen-map {
+    min-height: 400px;
+    height: 100%;
   }
 }
 
 @media (max-width: 640px) {
+  /* 1. 顶栏面包屑与定位胶囊适配 */
+  .breadcrumb-muted,
+  .breadcrumb-sep {
+    display: none;
+  }
+
+  #top-location-text {
+    display: none;
+  }
+
+  .location-pill {
+    padding: 0.35rem 0.55rem;
+  }
+
+  /* 2. 页面标题导言区紧凑化 */
   .page-intro {
     flex-direction: column;
     align-items: stretch;
+    gap: 0.85rem;
+    margin-bottom: 1.25rem;
+  }
+
+  .page-intro h1 {
+    font-size: 1.45rem;
+  }
+
+  .page-intro p {
+    font-size: 0.84rem;
+    line-height: 1.5;
+  }
+
+  .page-intro-actions {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 0.5rem;
   }
 
   .intro-date-badge {
@@ -2415,18 +2506,300 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    padding: 0.6rem 0.85rem;
+  }
+
+  /* 3. SOS 求助主面板移动端适配 */
+  .emergency-panel {
+    padding: 1.25rem 1rem;
+    border-radius: var(--radius-lg);
+  }
+
+  .emergency-copy h2 {
+    font-size: 1.5rem;
+    line-height: 1.25;
+  }
+
+  .emergency-copy p {
+    font-size: 0.85rem;
+  }
+
+  .alert-button-area {
+    padding: 1.5rem 0;
+    overflow: hidden;
+  }
+
+  .alert-button {
+    width: 155px;
+    height: 155px;
+  }
+
+  .alert-button-sos {
+    font-size: 2.1rem;
+  }
+
+  .alert-button-label {
+    font-size: 0.85rem;
+  }
+
+  .alert-button-sub {
+    font-size: 0.65rem;
+  }
+
+  .ring-1 {
+    width: 170px;
+    height: 170px;
+  }
+
+  .ring-2 {
+    width: 190px;
+    height: 190px;
+  }
+
+  .ring-3 {
+    width: 215px;
+    height: 215px;
+  }
+
+  .emergency-footer {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding-top: 0.95rem;
+  }
+
+  .emergency-footer-divider {
+    display: none;
+  }
+
+  /* 4. 雷达地图工具条滑动抽屉与高度 */
+  .radar-map-card {
+    padding: 0.65rem;
+    border-radius: var(--radius-lg);
+  }
+
+  .radar-map-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+
+  .radar-toolbar-left {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+    gap: 0.45rem;
+    scrollbar-width: none;
+  }
+
+  .radar-toolbar-left::-webkit-scrollbar {
+    display: none;
+  }
+
+  .radar-toolbar-left .button {
+    flex-shrink: 0;
+    white-space: nowrap;
+    padding: 5px 10px;
+    font-size: 0.74rem;
+  }
+
+  .radar-toolbar-right {
+    justify-content: flex-end;
+  }
+
+  .radar-gps-indicator {
+    font-size: 0.7rem;
+    padding: 0.2rem 0.6rem;
+  }
+
+  .radar-map-wrapper {
+    min-height: 380px;
+    height: calc(100vh - 290px);
+    max-height: 540px;
+  }
+
+  #radar-fullscreen-map {
+    min-height: 380px;
+    height: 100%;
+  }
+
+  /* 5. 雷达浮动坐标卡移动端紧凑化 */
+  .radar-map-overlay-info {
+    bottom: 8px;
+    left: 8px;
+    right: 8px;
+    padding: 4px 8px;
+    gap: 6px;
+    justify-content: space-around;
+  }
+
+  .radar-stat-box small {
+    font-size: 0.6rem;
+  }
+
+  .radar-stat-box strong {
+    font-size: 0.72rem;
+  }
+
+  .radar-stat-divider {
+    height: 18px;
+  }
+
+  /* 6. 在线花名册抽屉浮层 (居中自适应，杜绝溢出屏幕) */
+  .radar-roster-popover {
+    position: fixed;
+    top: auto;
+    bottom: calc(72px + env(safe-area-inset-bottom));
+    left: 10px;
+    right: 10px;
+    width: auto;
+    max-height: 62vh;
+    border-radius: var(--radius-lg);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7);
+  }
+
+  .radar-roster-list {
+    max-height: calc(62vh - 120px);
+  }
+
+  /* 7. 移动端原生底抽屉模态框 (Bottom Sheet) */
+  .modal-backdrop {
+    padding: 0;
+    align-items: flex-end;
+  }
+
+  .glass-card-modal {
+    width: 100%;
+    max-width: 100%;
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+    padding: 1.25rem 1rem calc(1.25rem + env(safe-area-inset-bottom)) 1rem;
+    max-height: 88vh;
+    overflow-y: auto;
+    animation: modalSheetSlideUp 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @keyframes modalSheetSlideUp {
+    from {
+      opacity: 0;
+      transform: translateY(100%);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* 8. 表单输入框与防止 iOS 聚焦自动缩放 */
+  .field-control input,
+  .field-control textarea,
+  .field-control select,
+  .contact-input {
+    font-size: 16px !important; /* 核心：防止 iOS Safari 放大页面 */
+    padding: 0.75rem 0.85rem 0.75rem 2.6rem;
   }
 
   .form-grid {
     grid-template-columns: 1fr;
+    gap: 0.85rem;
   }
 
   .field-span-2 {
     grid-column: span 1;
   }
 
+  .form-panel {
+    padding: 1.25rem 1rem;
+  }
+
+  /* 9. 救援通道与联系人卡片适配 */
+  .channel-row {
+    padding: 0.75rem 0.85rem;
+    gap: 0.65rem;
+  }
+
   .contacts-grid {
     grid-template-columns: 1fr;
+  }
+
+  .contact-card {
+    padding: 1rem;
+  }
+
+  .contact-input-row {
+    grid-template-columns: 1fr;
+    gap: 0.65rem;
+  }
+
+  /* 10. 小队栏移动端布局 */
+  .team-radar-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.65rem;
+  }
+
+  .team-radar-meta {
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+
+  .team-radar-actions {
+    display: flex;
+    justify-content: flex-end;
+  }
+}
+
+@media (max-width: 480px) {
+  .team-modal-current-card {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.65rem;
+  }
+
+  .team-modal-current-actions {
+    justify-content: flex-end;
+  }
+
+  .roster-room-manage-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+
+  .room-manage-actions {
+    justify-content: flex-end;
+  }
+
+  .user-center-details-grid {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    padding: 10px;
+  }
+}
+
+@media (max-width: 400px) {
+  .topbar {
+    padding: 0 0.65rem;
+  }
+
+  .user-pill {
+    max-width: 100px;
+  }
+
+  #top-user-name {
+    max-width: 55px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .emergency-copy h2 {
+    font-size: 1.35rem;
   }
 }
 
