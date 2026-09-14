@@ -552,6 +552,22 @@
                     <div class="roster-popover-tips">
                       <span>点击成员卡片可快速在地图中定位聚焦</span>
                     </div>
+                    <div id="roster-room-manage-bar" class="roster-room-manage-bar">
+                      <div class="room-manage-role">
+                        <span id="radar-room-role-pill" class="room-role-pill"><i data-lucide="shield"></i> <span id="radar-room-role-text">队员</span></span>
+                        <span id="radar-room-code-tag" class="room-code-tag">#666888</span>
+                      </div>
+                      <div class="room-manage-actions">
+                        <button id="radar-leave-room-btn" class="button button-outline button-compact" type="button" title="退出当前房间，停止位置同步">
+                          <i data-lucide="log-out"></i>
+                          <span>退出小队</span>
+                        </button>
+                        <button id="radar-disband-room-btn" class="button button-outline button-compact button-danger" type="button" title="房主解散小队，关闭房间" style="display:none;">
+                          <i data-lucide="trash-2"></i>
+                          <span>解散房间</span>
+                        </button>
+                      </div>
+                    </div>
                     <div class="radar-roster-list" id="radar-roster-list">
                       <!-- 动态生成队友卡片 -->
                     </div>
@@ -1297,6 +1313,10 @@
                 <i data-lucide="users"></i>
                 <span>切换或新建小队房间</span>
               </button>
+              <button id="uc-leave-team-btn" class="button button-outline button-full" type="button" style="display:none;">
+                <i data-lucide="log-out"></i>
+                <span>退出当前小队房间</span>
+              </button>
               <button id="uc-logout-btn" class="button button-outline button-full" type="button" style="color:var(--rose-400);border-color:rgba(244,63,94,0.35);">
                 <i data-lucide="log-out"></i>
                 <span>退出登录 / 切换账号</span>
@@ -1321,8 +1341,29 @@
         </div>
 
         <div class="modal-body">
-          <p class="auth-intro-note">
-            与同行朋友或导游输入相同的小队房间号（支持纯数字如 <code>666888</code> 或字母如 <code>TH888</code>），大家的手机地图将实时显示彼此的头像、经纬度与相对距离！
+          <!-- 当前小队状态卡片 (在已加入房间时展示) -->
+          <div id="team-modal-current-card" class="team-modal-current-card" style="display:none;">
+            <div class="team-modal-current-left">
+              <span class="team-modal-sub-label">当前所在小队</span>
+              <div class="team-modal-curr-row">
+                <strong id="team-modal-curr-code">#666888</strong>
+                <span id="team-modal-curr-role" class="room-role-pill"><i data-lucide="shield"></i> 队员</span>
+              </div>
+            </div>
+            <div class="team-modal-current-actions">
+              <button id="team-modal-leave-btn" class="button button-outline button-compact" type="button" title="退出当前小队">
+                <i data-lucide="log-out"></i>
+                <span>退出小队</span>
+              </button>
+              <button id="team-modal-disband-btn" class="button button-outline button-compact button-danger" type="button" title="房主解散房间" style="display:none;">
+                <i data-lucide="trash-2"></i>
+                <span>解散房间</span>
+              </button>
+            </div>
+          </div>
+
+          <p class="auth-intro-note" id="team-modal-intro-note">
+            输入相同的小队房间号即可加入或新建；所有同房成员在全景雷达上可实时查看彼此相对距离与方位：
           </p>
 
           <form id="team-form" class="auth-form-layout">
@@ -1339,6 +1380,10 @@
                   maxlength="20"
                   value="666888"
                 />
+                <button id="team-code-random-btn" class="button button-secondary button-compact" type="button" title="随机生成一个全新的专属房间号" style="white-space:nowrap;margin-right:4px;padding:4px 10px;font-size:0.75rem;">
+                  <i data-lucide="shuffle"></i>
+                  <span>随机建房</span>
+                </button>
               </div>
             </label>
 

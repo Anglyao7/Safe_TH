@@ -42,9 +42,19 @@ interface UserTrackingLocation extends TeamMemberLocation {
   teamCode?: string;
 }
 
+interface TeamRoom {
+  code: string;
+  ownerId: string;
+  ownerName: string;
+  createdAt: number;
+  kickedUserIds: Set<string>;
+  disbanded?: boolean;
+}
+
 const users = new Map<string, User>();
 const sessions = new Map<string, string>(); // token -> username
 const teamLocations = new Map<string, Map<string, TeamMemberLocation>>(); // teamCode -> (userId -> loc)
+const teamRooms = new Map<string, TeamRoom>(); // teamCode -> TeamRoom
 const userLatestLocations = new Map<string, UserTrackingLocation>(); // identifier -> latest location
 const storedImages = new Map<string, StoredImage>();
 
@@ -226,19 +236,13 @@ app.get('/api/auth/me', (c) => {
 // ============================================================================
 app.post('/api/team/location', async (c) => {
   const body = await c.req.json().catch(() => ({}));
-  const teamCode = String(body.teamCode || '666888').trim();
+  const teamCode = body.teamCode ? String(body.teamCode).trim() : '';
   const userId = String(body.userId || 'guest').trim();
   const lat = Number(body.lat);
   const lng = Number(body.lng);
 
   if (isNaN(lat) || isNaN(lng)) {
     return c.json({ success: false, message: '坐标无效' }, 400);
-  }
-
-  let team = teamLocations.get(teamCode);
-  if (!team) {
-    team = new Map();
-    teamLocations.set(teamCode, team);
   }
 
   const memberLoc: TeamMemberLocation = {
@@ -254,19 +258,69 @@ app.post('/api/team/location', async (c) => {
     updatedAt: Date.now(),
   };
 
-  team.set(userId, memberLoc);
-
   const trackingData: UserTrackingLocation = {
     ...memberLoc,
-    teamCode,
+    teamCode: teamCode || undefined,
   };
   userLatestLocations.set(memberLoc.username, trackingData);
   userLatestLocations.set(memberLoc.userId, trackingData);
+
+  // 个人单人模式（未加入任何小队）
+  if (!teamCode) {
+    return c.json({
+      success: true,
+      teamCode: '',
+      activeCount: 1,
+      ownerId: '',
+      ownerName: '',
+    });
+  }
+
+  // 小队房间及生命周期判断
+  let room = teamRooms.get(teamCode);
+  if (!room) {
+    room = {
+      code: teamCode,
+      ownerId: userId,
+      ownerName: memberLoc.name,
+      createdAt: Date.now(),
+      kickedUserIds: new Set<string>(),
+    };
+    teamRooms.set(teamCode, room);
+  } else {
+    // 检查房间是否已被解散
+    if (room.disbanded) {
+      return c.json({
+        success: false,
+        disbanded: true,
+        message: `小队房间 #${teamCode} 已被房主解散`,
+      }, 403);
+    }
+
+    // 检查该用户是否已被移出/踢出
+    if (room.kickedUserIds.has(userId) || room.kickedUserIds.has(memberLoc.username)) {
+      return c.json({
+        success: false,
+        kicked: true,
+        message: `您已被移出小队房间 #${teamCode}`,
+      }, 403);
+    }
+  }
+
+  let team = teamLocations.get(teamCode);
+  if (!team) {
+    team = new Map();
+    teamLocations.set(teamCode, team);
+  }
+
+  team.set(userId, memberLoc);
 
   return c.json({
     success: true,
     teamCode,
     activeCount: team.size,
+    ownerId: room.ownerId,
+    ownerName: room.ownerName,
   });
 });
 
@@ -342,12 +396,51 @@ function handleTrackingLookup(c: any, identifier: string) {
 }
 
 app.get('/api/team/members', (c) => {
-  const teamCode = String(c.req.query('teamCode') || '666888').trim();
-  const team = teamLocations.get(teamCode);
+  const teamCode = String(c.req.query('teamCode') || '').trim();
+  const reqUserId = String(c.req.query('userId') || '').trim();
 
+  if (!teamCode) {
+    return c.json({
+      teamCode: '',
+      ownerId: '',
+      ownerName: '',
+      activeCount: 0,
+      members: [],
+    });
+  }
+
+  const room = teamRooms.get(teamCode);
+  if (room && room.disbanded) {
+    return c.json({
+      teamCode,
+      disbanded: true,
+      message: `小队房间 #${teamCode} 已被房主解散`,
+      ownerId: room.ownerId,
+      ownerName: room.ownerName,
+      activeCount: 0,
+      members: [],
+    });
+  }
+
+  if (room && reqUserId && room.kickedUserIds.has(reqUserId)) {
+    return c.json({
+      teamCode,
+      kicked: true,
+      message: `您已被移出小队房间 #${teamCode}`,
+      ownerId: room.ownerId,
+      ownerName: room.ownerName,
+      activeCount: 0,
+      members: [],
+    });
+  }
+
+  const team = teamLocations.get(teamCode);
   if (!team) {
     return c.json({
       teamCode,
+      ownerId: room ? room.ownerId : '',
+      ownerName: room ? room.ownerName : '',
+      activeCount: 0,
       members: [],
     });
   }
@@ -362,10 +455,138 @@ app.get('/api/team/members', (c) => {
     }
   }
 
+  // 房主在线维护：如果原房主离线且有其它活跃成员，顺位转让房主
+  if (room && memberList.length > 0) {
+    const ownerActive = memberList.some((m) => m.userId === room.ownerId);
+    if (!ownerActive) {
+      room.ownerId = memberList[0].userId;
+      room.ownerName = memberList[0].name;
+    }
+  }
+
   return c.json({
     teamCode,
+    ownerId: room ? room.ownerId : (memberList[0]?.userId || ''),
+    ownerName: room ? room.ownerName : (memberList[0]?.name || ''),
     activeCount: memberList.length,
     members: memberList,
+  });
+});
+
+// ============================================================================
+// 4.2 退出小队房间 (Leave Team Room)
+// ============================================================================
+app.post('/api/team/leave', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const teamCode = String(body.teamCode || '').trim();
+  const userId = String(body.userId || '').trim();
+
+  if (!teamCode || !userId) {
+    return c.json({ success: false, message: '缺少必要参数 (teamCode, userId)' }, 400);
+  }
+
+  const team = teamLocations.get(teamCode);
+  if (team) {
+    team.delete(userId);
+  }
+
+  const userLoc = userLatestLocations.get(userId);
+  if (userLoc && userLoc.teamCode === teamCode) {
+    delete userLoc.teamCode;
+  }
+
+  const room = teamRooms.get(teamCode);
+  if (room && room.ownerId === userId) {
+    // 房主退出：若还有其他队员，自动移交房主给下一位
+    if (team && team.size > 0) {
+      const nextMember = team.values().next().value;
+      if (nextMember) {
+        room.ownerId = nextMember.userId;
+        room.ownerName = nextMember.name;
+      }
+    } else {
+      // 房间已空，回收
+      teamRooms.delete(teamCode);
+      teamLocations.delete(teamCode);
+    }
+  }
+
+  return c.json({
+    success: true,
+    message: `已成功退出小队 #${teamCode}`,
+  });
+});
+
+// ============================================================================
+// 4.3 房主踢出成员 (Kick Member)
+// ============================================================================
+app.post('/api/team/kick', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const teamCode = String(body.teamCode || '').trim();
+  const operatorUserId = String(body.operatorUserId || '').trim();
+  const targetUserId = String(body.targetUserId || '').trim();
+
+  if (!teamCode || !operatorUserId || !targetUserId) {
+    return c.json({ success: false, message: '缺少必要参数' }, 400);
+  }
+
+  const room = teamRooms.get(teamCode);
+  if (room && room.ownerId && room.ownerId !== operatorUserId) {
+    return c.json({ success: false, message: '只有房主/创建者有权移出队员' }, 403);
+  }
+
+  if (targetUserId === operatorUserId) {
+    return c.json({ success: false, message: '房主不能将自己踢出，如需离开请选择“解散小队”或“退出小队”' }, 400);
+  }
+
+  const team = teamLocations.get(teamCode);
+  if (team) {
+    team.delete(targetUserId);
+  }
+
+  if (room) {
+    room.kickedUserIds.add(targetUserId);
+  }
+
+  const userLoc = userLatestLocations.get(targetUserId);
+  if (userLoc && userLoc.teamCode === teamCode) {
+    delete userLoc.teamCode;
+  }
+
+  return c.json({
+    success: true,
+    message: '已成功将该成员移出小队',
+    targetUserId,
+  });
+});
+
+// ============================================================================
+// 4.4 房主解散小队房间 (Disband Team Room)
+// ============================================================================
+app.post('/api/team/disband', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const teamCode = String(body.teamCode || '').trim();
+  const operatorUserId = String(body.operatorUserId || '').trim();
+
+  if (!teamCode || !operatorUserId) {
+    return c.json({ success: false, message: '缺少必要参数' }, 400);
+  }
+
+  const room = teamRooms.get(teamCode);
+  if (room && room.ownerId && room.ownerId !== operatorUserId) {
+    return c.json({ success: false, message: '只有房主/创建者有权解散该小队房间' }, 403);
+  }
+
+  if (room) {
+    room.disbanded = true;
+  }
+
+  // 清空房间位置数据
+  teamLocations.delete(teamCode);
+
+  return c.json({
+    success: true,
+    message: `小队房间 #${teamCode} 已被成功解散`,
   });
 });
 

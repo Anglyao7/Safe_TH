@@ -114,6 +114,9 @@
     user: null,
     token: null,
     teamCode: '666888',
+    roomOwnerId: '',
+    roomOwnerName: '',
+    isRoomOwner: false,
     teamMembers: [],
     overviewTeamMarkers: new Map(),
     radarMap: null,
@@ -223,7 +226,7 @@
       }
 
       const savedTeam = localStorage.getItem(STORAGE_KEYS.TEAM_CODE);
-      if (savedTeam) {
+      if (savedTeam !== null) {
         state.teamCode = savedTeam;
       }
     } catch (e) {
@@ -2143,7 +2146,7 @@ ${googleMapUrl}
   }
 
   // ==========================================
-  // 多人小队位置同步与实时雷达系统
+  // 10. 多人小队雷达与实时位置共享生命周期体系
   // ==========================================
   function initTeamSystem() {
     const switchBtn = document.getElementById('switch-team-btn');
@@ -2151,12 +2154,37 @@ ${googleMapUrl}
     const closeTeamBtn = document.getElementById('close-team-modal');
     const teamForm = document.getElementById('team-form');
 
+    // 随机房间号生成按钮
+    const randomCodeBtn = document.getElementById('team-code-random-btn');
+    if (randomCodeBtn) {
+      randomCodeBtn.addEventListener('click', () => {
+        const input = document.getElementById('team-code-input');
+        const randNum = Math.floor(1000 + Math.random() * 9000);
+        const randCode = `TH${randNum}`;
+        if (input) input.value = randCode;
+        showToast(`已生成专属房间号 #${randCode}，点击确认即可创建并成为房主！`);
+      });
+    }
+
+    // 退出小队与解散小队交互绑定
+    const radarLeaveBtn = document.getElementById('radar-leave-room-btn');
+    const radarDisbandBtn = document.getElementById('radar-disband-room-btn');
+    const modalLeaveBtn = document.getElementById('team-modal-leave-btn');
+    const modalDisbandBtn = document.getElementById('team-modal-disband-btn');
+    const ucLeaveBtn = document.getElementById('uc-leave-team-btn');
+
+    if (radarLeaveBtn) radarLeaveBtn.addEventListener('click', leaveTeamRoom);
+    if (radarDisbandBtn) radarDisbandBtn.addEventListener('click', disbandTeamRoom);
+    if (modalLeaveBtn) modalLeaveBtn.addEventListener('click', leaveTeamRoom);
+    if (modalDisbandBtn) modalDisbandBtn.addEventListener('click', disbandTeamRoom);
+    if (ucLeaveBtn) ucLeaveBtn.addEventListener('click', leaveTeamRoom);
+
     updateRoomBadgesUI();
 
     if (switchBtn && teamModal) {
       switchBtn.addEventListener('click', () => {
         const input = document.getElementById('team-code-input');
-        if (input) input.value = state.teamCode;
+        if (input) input.value = state.teamCode || '';
         teamModal.removeAttribute('hidden');
       });
     }
@@ -2198,10 +2226,65 @@ ${googleMapUrl}
     const overviewBadge = document.getElementById('team-room-code-badge');
     const radarBadge = document.getElementById('radar-room-badge');
     const modalInput = document.getElementById('team-code-input');
+    const ucTeam = document.getElementById('uc-team-code');
+    const ucLeaveBtn = document.getElementById('uc-leave-team-btn');
 
-    if (overviewBadge) overviewBadge.textContent = `房间号 #${state.teamCode}`;
-    if (radarBadge) radarBadge.innerHTML = `<i data-lucide="hash"></i> 房间号 #${state.teamCode}`;
-    if (modalInput) modalInput.value = state.teamCode;
+    // 雷达花名册操作栏元素
+    const rosterBar = document.getElementById('roster-room-manage-bar');
+    const rosterRolePill = document.getElementById('radar-room-role-pill');
+    const rosterRoleText = document.getElementById('radar-room-role-text');
+    const rosterCodeTag = document.getElementById('radar-room-code-tag');
+    const rosterLeaveBtn = document.getElementById('radar-leave-room-btn');
+    const rosterDisbandBtn = document.getElementById('radar-disband-room-btn');
+
+    // 模态窗当前小队卡片
+    const modalCurrentCard = document.getElementById('team-modal-current-card');
+    const modalCurrCode = document.getElementById('team-modal-curr-code');
+    const modalCurrRole = document.getElementById('team-modal-curr-role');
+    const modalLeaveBtn = document.getElementById('team-modal-leave-btn');
+    const modalDisbandBtn = document.getElementById('team-modal-disband-btn');
+
+    const hasTeam = Boolean(state.teamCode && state.teamCode.trim().length > 0);
+
+    if (hasTeam) {
+      if (overviewBadge) overviewBadge.textContent = `房间号 #${state.teamCode}`;
+      if (radarBadge) radarBadge.innerHTML = `<i data-lucide="hash"></i> 房间号 #${state.teamCode}`;
+      if (modalInput) modalInput.value = state.teamCode;
+      if (ucTeam) ucTeam.textContent = `#${state.teamCode}`;
+      if (ucLeaveBtn) ucLeaveBtn.style.display = 'inline-flex';
+
+      if (rosterBar) rosterBar.style.display = 'flex';
+      if (rosterCodeTag) rosterCodeTag.textContent = `#${state.teamCode}`;
+      if (rosterRoleText) rosterRoleText.textContent = state.isRoomOwner ? '房主' : '队员';
+      if (rosterRolePill) {
+        rosterRolePill.className = state.isRoomOwner ? 'room-role-pill is-owner' : 'room-role-pill';
+        rosterRolePill.innerHTML = state.isRoomOwner
+          ? '<i data-lucide="crown"></i> 房主'
+          : '<i data-lucide="shield"></i> 队员';
+      }
+      if (rosterLeaveBtn) rosterLeaveBtn.style.display = 'inline-flex';
+      if (rosterDisbandBtn) rosterDisbandBtn.style.display = state.isRoomOwner ? 'inline-flex' : 'none';
+
+      if (modalCurrentCard) modalCurrentCard.style.display = 'flex';
+      if (modalCurrCode) modalCurrCode.textContent = `#${state.teamCode}`;
+      if (modalCurrRole) {
+        modalCurrRole.className = state.isRoomOwner ? 'room-role-pill is-owner' : 'room-role-pill';
+        modalCurrRole.innerHTML = state.isRoomOwner
+          ? '<i data-lucide="crown"></i> 房主'
+          : '<i data-lucide="shield"></i> 队员';
+      }
+      if (modalLeaveBtn) modalLeaveBtn.style.display = 'inline-flex';
+      if (modalDisbandBtn) modalDisbandBtn.style.display = state.isRoomOwner ? 'inline-flex' : 'none';
+    } else {
+      if (overviewBadge) overviewBadge.textContent = '单人独立守护模式';
+      if (radarBadge) radarBadge.innerHTML = '<i data-lucide="shield"></i> 单人守护模式';
+      if (modalInput) modalInput.value = '';
+      if (ucTeam) ucTeam.textContent = '未加入小队 (个人模式)';
+      if (ucLeaveBtn) ucLeaveBtn.style.display = 'none';
+
+      if (rosterBar) rosterBar.style.display = 'none';
+      if (modalCurrentCard) modalCurrentCard.style.display = 'none';
+    }
 
     initIcons();
   }
@@ -2230,6 +2313,154 @@ ${googleMapUrl}
     fetchTeamMembers();
     showToast(`已切换至房间 #${code}，雷达全员同步中！`);
     return true;
+  }
+
+  function leaveTeamRoom() {
+    if (!state.teamCode) return;
+    const room = state.teamCode;
+    const ok = confirm(`确定要退出当前小队房间【#${room}】吗？\n退出后其他队员将无法在雷达上查看您的实时动态。`);
+    if (!ok) return;
+
+    fetch('/api/team/leave', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        teamCode: room,
+        userId: state.user?.id || '',
+      }),
+    }).catch(() => {});
+
+    state.teamCode = '';
+    try {
+      localStorage.setItem(STORAGE_KEYS.TEAM_CODE, '');
+    } catch (e) {}
+
+    state.teamMembers = [];
+    state.roomOwnerId = '';
+    state.roomOwnerName = '';
+    state.isRoomOwner = false;
+
+    // 清空地图图钉
+    state.overviewTeamMarkers.forEach((m) => state.map?.removeLayer(m));
+    state.overviewTeamMarkers.clear();
+    state.radarTeamMarkers.forEach((m) => state.radarMap?.removeLayer(m));
+    state.radarTeamMarkers.clear();
+
+    updateRoomBadgesUI();
+    renderTeamMembersUI();
+    updateTeamMapMarkers();
+
+    const teamModal = document.getElementById('team-modal');
+    if (teamModal) teamModal.setAttribute('hidden', '');
+
+    showToast(`已成功退出小队 #${room}，当前处于单人独立守护模式！`);
+  }
+
+  function disbandTeamRoom() {
+    if (!state.teamCode) return;
+    const room = state.teamCode;
+    const ok = confirm(`⚠️ 警告：解散后小队房间【#${room}】将被彻底关闭，所有在线队员都将被移出小队并停止雷达同步！\n\n确定要解散该房间吗？`);
+    if (!ok) return;
+
+    fetch('/api/team/disband', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        teamCode: room,
+        operatorUserId: state.user?.id || '',
+      }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success) {
+          state.teamCode = '';
+          try {
+            localStorage.setItem(STORAGE_KEYS.TEAM_CODE, '');
+          } catch (e) {}
+
+          state.teamMembers = [];
+          state.roomOwnerId = '';
+          state.roomOwnerName = '';
+          state.isRoomOwner = false;
+
+          state.overviewTeamMarkers.forEach((m) => state.map?.removeLayer(m));
+          state.overviewTeamMarkers.clear();
+          state.radarTeamMarkers.forEach((m) => state.radarMap?.removeLayer(m));
+          state.radarTeamMarkers.clear();
+
+          updateRoomBadgesUI();
+          renderTeamMembersUI();
+          updateTeamMapMarkers();
+
+          const teamModal = document.getElementById('team-modal');
+          if (teamModal) teamModal.setAttribute('hidden', '');
+
+          showToast(`小队房间 #${room} 已成功解散！`);
+        } else {
+          showToast(data.message || '解散失败', 'error');
+        }
+      })
+      .catch((err) => {
+        showToast('解散接口请求失败: ' + err.message, 'error');
+      });
+  }
+
+  function kickTeamMember(targetMember) {
+    if (!state.teamCode || !targetMember) return;
+    const ok = confirm(`确定要将成员【${targetMember.name}】移出当前小队吗？\n移出后TA将无法继续在雷达上查看和共享本小队位置。`);
+    if (!ok) return;
+
+    fetch('/api/team/kick', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        teamCode: state.teamCode,
+        operatorUserId: state.user?.id || '',
+        targetUserId: targetMember.userId,
+      }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success) {
+          showToast(`已成功将【${targetMember.name}】移出小队！`);
+          state.teamMembers = state.teamMembers.filter((m) => m.userId !== targetMember.userId);
+          renderTeamMembersUI();
+          updateTeamMapMarkers();
+        } else {
+          showToast(data.message || '移出失败', 'error');
+        }
+      })
+      .catch((err) => {
+        showToast('请求接口失败: ' + err.message, 'error');
+      });
+  }
+
+  function handleRoomKickedOrDisbanded(type, message) {
+    const oldRoom = state.teamCode;
+    state.teamCode = '';
+    try {
+      localStorage.setItem(STORAGE_KEYS.TEAM_CODE, '');
+    } catch (e) {}
+
+    state.teamMembers = [];
+    state.roomOwnerId = '';
+    state.roomOwnerName = '';
+    state.isRoomOwner = false;
+
+    state.overviewTeamMarkers.forEach((m) => state.map?.removeLayer(m));
+    state.overviewTeamMarkers.clear();
+    state.radarTeamMarkers.forEach((m) => state.radarMap?.removeLayer(m));
+    state.radarTeamMarkers.clear();
+
+    updateRoomBadgesUI();
+    renderTeamMembersUI();
+    updateTeamMapMarkers();
+
+    if (type === 'kicked') {
+      showToast(message || `您已被房主移出小队房间 #${oldRoom}，已自动切回单人模式`, 'error');
+    } else {
+      showToast(message || `小队房间 #${oldRoom} 已被房主解散，已切回单人守护模式`, 'warning');
+    }
   }
 
   function fitAllMembers(mapInstance) {
@@ -2277,17 +2508,57 @@ ${googleMapUrl}
         accuracy: state.location.accuracy || 20,
         status: 'normal',
       }),
-    }).catch(() => {});
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (!data) return;
+        if (data.disbanded) {
+          handleRoomKickedOrDisbanded('disbanded', data.message);
+          return;
+        }
+        if (data.kicked) {
+          handleRoomKickedOrDisbanded('kicked', data.message);
+          return;
+        }
+        if (data.ownerId && data.ownerId !== state.roomOwnerId) {
+          state.roomOwnerId = data.ownerId;
+          state.roomOwnerName = data.ownerName || '';
+          state.isRoomOwner = !!(state.user && state.roomOwnerId === state.user.id);
+          updateRoomBadgesUI();
+        }
+      })
+      .catch(() => {});
   }
 
   function fetchTeamMembers() {
-    fetch(`/api/team/members?teamCode=${encodeURIComponent(state.teamCode)}`)
+    if (!state.teamCode) {
+      state.teamMembers = [];
+      renderTeamMembersUI();
+      updateTeamMapMarkers();
+      return;
+    }
+
+    fetch(`/api/team/members?teamCode=${encodeURIComponent(state.teamCode)}&userId=${encodeURIComponent(state.user?.id || '')}`)
       .then((res) => res.json())
       .then((data) => {
-        if (!data || !Array.isArray(data.members)) return;
-        state.teamMembers = data.members;
-        renderTeamMembersUI();
-        updateTeamMapMarkers();
+        if (!data) return;
+        if (data.disbanded) {
+          handleRoomKickedOrDisbanded('disbanded', data.message);
+          return;
+        }
+        if (data.kicked) {
+          handleRoomKickedOrDisbanded('kicked', data.message);
+          return;
+        }
+        if (Array.isArray(data.members)) {
+          state.teamMembers = data.members;
+          state.roomOwnerId = data.ownerId || '';
+          state.roomOwnerName = data.ownerName || '';
+          state.isRoomOwner = !!(state.user && state.roomOwnerId && state.roomOwnerId === state.user.id);
+          renderTeamMembersUI();
+          updateTeamMapMarkers();
+          updateRoomBadgesUI();
+        }
       })
       .catch(() => {});
   }
@@ -2296,41 +2567,60 @@ ${googleMapUrl}
     const myLat = state.location.lat || DEFAULT_BANGKOK.lat;
     const myLng = state.location.lng || DEFAULT_BANGKOK.lng;
 
+    const hasTeam = Boolean(state.teamCode && state.teamCode.trim().length > 0);
+
     // 1. 更新中控台简易列表
     const overviewListEl = document.getElementById('team-members-list');
     const overviewCountEl = document.getElementById('team-online-count');
     if (overviewCountEl) {
-      overviewCountEl.innerHTML = `<i data-lucide="users"></i> ${state.teamMembers.length} 人实时在线`;
+      overviewCountEl.innerHTML = hasTeam
+        ? `<i data-lucide="users"></i> ${state.teamMembers.length} 人实时在线`
+        : `<i data-lucide="shield"></i> 单人守护模式就绪`;
     }
     if (overviewListEl) {
       overviewListEl.innerHTML = '';
-      state.teamMembers.forEach((member) => {
-        const isMe = state.user && (member.userId === state.user.id || member.username === state.user.username);
-        const distM = calculateDistance(myLat, myLng, member.lat, member.lng);
-        const distStr = isMe ? '我的位置' : `距你 ${formatDistance(distM)}`;
-
-        const item = document.createElement('div');
-        item.className = 'team-member-item';
-        item.innerHTML = `
-          <div class="team-member-info">
-            <div class="member-avatar-mini">
-              ${
-                member.avatar
-                  ? `<img src="${member.avatar}" alt="Avatar">`
-                  : (member.name ? member.name.charAt(0) : '友')
-              }
-            </div>
-            <div class="member-text">
-              <strong>${escapeHtml(member.name)} ${isMe ? '<span style="color:var(--blue-400);font-size:0.7rem;">(我)</span>' : ''}</strong>
-              <span>坐标: ${member.lat.toFixed(4)}, ${member.lng.toFixed(4)} · 误差约 ±${member.accuracy}米</span>
-            </div>
-          </div>
-          <div class="distance-pill ${isMe ? 'is-me' : ''}">
-            ${distStr}
+      if (!hasTeam) {
+        overviewListEl.innerHTML = `
+          <div style="text-align:center;padding:14px;color:var(--text-muted);font-size:0.8rem;">
+            当前处于单人独立模式，点击“房间号”或右上角“加入小队”即可与同行好友实时互联。
           </div>
         `;
-        overviewListEl.appendChild(item);
-      });
+      } else if (state.teamMembers.length === 0) {
+        overviewListEl.innerHTML = `
+          <div style="text-align:center;padding:14px;color:var(--text-muted);font-size:0.8rem;">
+            房间内暂无其他成员，等待同伴加入...
+          </div>
+        `;
+      } else {
+        state.teamMembers.forEach((member) => {
+          const isMe = state.user && (member.userId === state.user.id || member.username === state.user.username);
+          const distM = calculateDistance(myLat, myLng, member.lat, member.lng);
+          const distStr = isMe ? '我的位置' : `距你 ${formatDistance(distM)}`;
+          const isOwner = member.userId === state.roomOwnerId;
+
+          const item = document.createElement('div');
+          item.className = 'team-member-item';
+          item.innerHTML = `
+            <div class="team-member-info">
+              <div class="member-avatar-mini">
+                ${
+                  member.avatar
+                    ? `<img src="${member.avatar}" alt="Avatar">`
+                    : (member.name ? member.name.charAt(0) : '友')
+                }
+              </div>
+              <div class="member-text">
+                <strong>${escapeHtml(member.name)} ${isMe ? '<span style="color:var(--blue-400);font-size:0.7rem;">(我)</span>' : ''} ${isOwner ? '<span class="room-role-pill is-owner" style="margin-left:4px;"><i data-lucide="crown"></i> 房主</span>' : ''}</strong>
+                <span>坐标: ${member.lat.toFixed(4)}, ${member.lng.toFixed(4)} · 误差约 ±${member.accuracy}米</span>
+              </div>
+            </div>
+            <div class="distance-pill ${isMe ? 'is-me' : ''}">
+              ${distStr}
+            </div>
+          `;
+          overviewListEl.appendChild(item);
+        });
+      }
     }
 
     // 2. 更新独立雷达中心全景花名册与在线药丸
@@ -2339,55 +2629,96 @@ ${googleMapUrl}
     const radarRosterPillText = document.getElementById('radar-roster-pill-text');
 
     if (radarRosterCountEl) {
-      radarRosterCountEl.innerHTML = `<i data-lucide="users"></i> ${state.teamMembers.length}人在线`;
+      radarRosterCountEl.innerHTML = hasTeam
+        ? `<i data-lucide="users"></i> ${state.teamMembers.length}人在线`
+        : `<i data-lucide="shield"></i> 单人模式`;
     }
     if (radarRosterPillText) {
-      radarRosterPillText.textContent = `${state.teamMembers.length}人在线`;
+      radarRosterPillText.textContent = hasTeam
+        ? `${state.teamMembers.length}人在线`
+        : '单人模式';
     }
 
     if (radarRosterListEl) {
       radarRosterListEl.innerHTML = '';
-      state.teamMembers.forEach((member) => {
-        const isMe = state.user && (member.userId === state.user.id || member.username === state.user.username);
-        const distM = calculateDistance(myLat, myLng, member.lat, member.lng);
-        const distStr = isMe ? '当前位置' : formatDistance(distM);
-
-        const item = document.createElement('div');
-        item.className = 'radar-roster-item';
-        item.title = '点击可在地图上聚焦该成员';
-        item.innerHTML = `
-          <div class="radar-roster-left">
-            <div class="radar-roster-avatar">
-              ${
-                member.avatar
-                  ? `<img src="${member.avatar}" alt="${escapeHtml(member.name)}">`
-                  : (member.name ? member.name.charAt(0) : '友')
-              }
-            </div>
-            <div class="radar-roster-info">
-              <strong>${escapeHtml(member.name)} ${isMe ? '<span style="color:var(--blue-400);font-size:0.75rem;">(我)</span>' : ''}</strong>
-              <span>${member.phone || '未公开电话'} · 经纬: ${member.lat.toFixed(3)}, ${member.lng.toFixed(3)}</span>
-            </div>
-          </div>
-          <div class="radar-roster-dist">
-            ${distStr}
+      if (!hasTeam) {
+        radarRosterListEl.innerHTML = `
+          <div style="text-align:center;padding:24px 12px;color:var(--text-muted);font-size:0.82rem;">
+            <i data-lucide="shield" style="width:28px;height:28px;display:block;margin:0 auto 8px;opacity:0.6;color:var(--emerald-400);"></i>
+            <strong>当前处于单人独立守护模式</strong>
+            <span style="font-size:0.75rem;opacity:0.75;margin-top:4px;display:block;">
+              点击上方“创建 / 切换房间”即可生成专属房间号，邀请亲友同行互看！
+            </span>
           </div>
         `;
+      } else if (state.teamMembers.length === 0) {
+        radarRosterListEl.innerHTML = `
+          <div style="text-align:center;padding:20px 10px;color:var(--text-muted);font-size:0.8rem;">
+            房间 #${state.teamCode} 暂无其他在线成员，分享房间码给同行朋友加入吧！
+          </div>
+        `;
+      } else {
+        state.teamMembers.forEach((member) => {
+          const isMe = state.user && (member.userId === state.user.id || member.username === state.user.username);
+          const distM = calculateDistance(myLat, myLng, member.lat, member.lng);
+          const distStr = isMe ? '当前位置' : formatDistance(distM);
+          const isOwner = member.userId === state.roomOwnerId;
 
-        item.addEventListener('click', () => {
-          if (state.radarMap) {
-            const disp = toMapCoordinate(member.lat, member.lng);
-            state.radarMap.flyTo([disp.lat, disp.lng], 16, { duration: 1.2 });
-            const marker = state.radarTeamMarkers.get(member.userId);
-            if (marker) {
-              setTimeout(() => marker.openPopup(), 1200);
+          const item = document.createElement('div');
+          item.className = 'radar-roster-item';
+          item.title = '点击可在地图上聚焦该成员';
+          item.innerHTML = `
+            <div class="radar-roster-left">
+              <div class="radar-roster-avatar">
+                ${
+                  member.avatar
+                    ? `<img src="${member.avatar}" alt="${escapeHtml(member.name)}">`
+                    : (member.name ? member.name.charAt(0) : '友')
+                }
+              </div>
+              <div class="radar-roster-info">
+                <strong>${escapeHtml(member.name)} ${isMe ? '<span style="color:var(--blue-400);font-size:0.75rem;">(我)</span>' : ''} ${isOwner ? '<span class="room-role-pill is-owner" style="margin-left:4px;"><i data-lucide="crown"></i> 房主</span>' : ''}</strong>
+                <span>${member.phone || '未公开电话'} · 经纬: ${member.lat.toFixed(3)}, ${member.lng.toFixed(3)}</span>
+              </div>
+            </div>
+            <div class="radar-roster-right">
+              <div class="radar-roster-dist">
+                ${distStr}
+              </div>
+              ${
+                state.isRoomOwner && !isMe
+                  ? `<button class="kick-member-btn" type="button" title="移出小队"><i data-lucide="user-minus"></i> 踢出</button>`
+                  : ''
+              }
+            </div>
+          `;
+
+          // 点击整行聚焦地图
+          item.addEventListener('click', (e) => {
+            if (e.target.closest('.kick-member-btn')) return;
+            if (state.radarMap) {
+              const disp = toMapCoordinate(member.lat, member.lng);
+              state.radarMap.flyTo([disp.lat, disp.lng], 16, { duration: 1.2 });
+              const marker = state.radarTeamMarkers.get(member.userId);
+              if (marker) {
+                setTimeout(() => marker.openPopup(), 1200);
+              }
+              showToast(`已在全景地图中定位聚焦：${member.name}`);
             }
-            showToast(`已在全景地图中定位聚焦：${member.name}`);
-          }
-        });
+          });
 
-        radarRosterListEl.appendChild(item);
-      });
+          // 绑定踢人按钮
+          const kickBtn = item.querySelector('.kick-member-btn');
+          if (kickBtn) {
+            kickBtn.addEventListener('click', (e) => {
+              e.stopPropagation();
+              kickTeamMember(member);
+            });
+          }
+
+          radarRosterListEl.appendChild(item);
+        });
+      }
     }
 
     initIcons();
