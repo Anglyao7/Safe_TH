@@ -1,0 +1,1171 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#0B1116" />
+    <meta
+      name="description"
+      content="护途是面向泰国行程的个人安全档案与紧急求助工作台，基于 Cloudflare 边缘计算与本地安全存储。"
+    />
+    <title>护途 · 泰国行程安全中心 (HuTu Safety Console)</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      crossorigin=""
+    />
+    <link rel="stylesheet" href="styles.css" />
+
+    <!-- 高德地图开放平台定位与高精逆地理编码 (AMap 2.0) -->
+    <script type="text/javascript">
+      window._AMapSecurityConfig = {
+        securityJsCode: '6f85972a5ec9bbf77878e918348590cd',
+      };
+    </script>
+    <script
+      type="text/javascript"
+      src="https://webapi.amap.com/maps?v=2.0&key=001db569bf798bdec833ce4470e562d7&plugin=AMap.Geolocation,AMap.Geocoder"
+    ></script>
+  </head>
+  <body>
+    <!-- 顶部背景光晕微动效 -->
+    <div class="ambient-glow glow-emerald" aria-hidden="true"></div>
+    <div class="ambient-glow glow-crimson" aria-hidden="true"></div>
+
+    <div class="app-shell">
+      <!-- 桌面端/平板主侧边栏 -->
+      <aside class="sidebar" id="sidebar" aria-label="主要导航">
+        <div class="sidebar-main">
+          <a class="brand" href="#overview" aria-label="返回护途总览">
+            <div class="brand-mark">
+              <i data-lucide="shield-alert"></i>
+            </div>
+            <div class="brand-copy">
+              <strong>护途 <span>HuTu</span></strong>
+              <small>THAILAND SAFETY CONSOLE</small>
+            </div>
+          </a>
+
+          <div class="trip-status">
+            <span class="live-dot-pulse" aria-hidden="true"></span>
+            <div class="trip-status-text">
+              <span class="trip-status-title">泰国行程守护中</span>
+              <span class="trip-status-sub">Cloudflare Edge 就绪</span>
+            </div>
+            <span class="trip-status-badge">LIVE</span>
+          </div>
+
+          <div class="nav-label">中控台工作区</div>
+          <nav id="primary-nav" class="primary-nav">
+            <button class="nav-item active" type="button" data-view="overview">
+              <span class="nav-icon"><i data-lucide="layout-dashboard"></i></span>
+              <span class="nav-text">总览中控</span>
+              <kbd>01</kbd>
+            </button>
+            <button class="nav-item" type="button" data-view="radar">
+              <span class="nav-icon"><i data-lucide="radar"></i></span>
+              <span class="nav-text">实时定位雷达</span>
+              <kbd>02</kbd>
+            </button>
+            <button class="nav-item" type="button" data-view="profile">
+              <span class="nav-icon"><i data-lucide="id-card"></i></span>
+              <span class="nav-text">我的档案</span>
+              <kbd>03</kbd>
+            </button>
+            <button class="nav-item" type="button" data-view="contacts">
+              <span class="nav-icon"><i data-lucide="users"></i></span>
+              <span class="nav-text">紧急联系人</span>
+              <kbd>04</kbd>
+            </button>
+            <button class="nav-item" type="button" data-view="settings">
+              <span class="nav-icon"><i data-lucide="settings-2"></i></span>
+              <span class="nav-text">安全设置</span>
+              <kbd>05</kbd>
+            </button>
+          </nav>
+        </div>
+
+        <div class="sidebar-foot">
+          <div class="sidebar-note">
+            <div class="note-icon"><i data-lucide="lock-keyhole"></i></div>
+            <div class="note-copy">
+              <strong>端侧安全加密</strong>
+              <span>敏感资料仅留存于本机储存</span>
+            </div>
+          </div>
+
+          <div class="sidebar-profile">
+            <div id="sidebar-avatar" class="avatar avatar-small">旅</div>
+            <div class="sidebar-profile-copy">
+              <strong id="sidebar-profile-name">还没有档案</strong>
+              <span id="sidebar-profile-phone">未填写联络手机</span>
+            </div>
+            <button
+              id="sidebar-profile-action"
+              class="icon-button icon-button-subtle"
+              type="button"
+              title="编辑我的档案"
+              aria-label="编辑我的档案"
+              data-view="profile"
+            >
+              <i data-lucide="pencil-line"></i>
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      <!-- 主视图区域 -->
+      <main class="main-content">
+        <header class="topbar">
+          <div class="topbar-left">
+            <button id="mobile-menu-btn" class="icon-button mobile-only" type="button" aria-label="打开菜单">
+              <i data-lucide="menu"></i>
+            </button>
+            <div class="breadcrumb">
+              <span class="breadcrumb-muted"><i data-lucide="shield"></i> 护途安保</span>
+              <span class="breadcrumb-sep">/</span>
+              <strong id="current-view-label">总览中控</strong>
+            </div>
+          </div>
+          
+          <div class="topbar-actions">
+            <button id="top-user-btn" class="user-pill" type="button" title="点击登录或切换账号">
+              <span class="user-pill-avatar" id="top-user-avatar">登</span>
+              <span id="top-user-name">快捷登录</span>
+            </button>
+            <button id="top-location-status" class="location-pill" type="button" title="点击重新获取位置">
+              <span class="status-dot status-dot-neutral" id="top-location-dot"></span>
+              <span id="top-location-text">等待定位授权</span>
+              <i data-lucide="locate-fixed"></i>
+            </button>
+            <button
+              id="theme-toggle"
+              class="icon-button"
+              type="button"
+              title="切换浅色 / 深色外观"
+              aria-label="切换浅色 / 深色外观"
+            >
+              <i data-lucide="sun" id="theme-toggle-icon"></i>
+            </button>
+          </div>
+        </header>
+
+        <div id="app-view" class="app-view">
+          <!-- 1. 总览面板 -->
+          <section class="view-panel active" data-view-panel="overview">
+            <div class="page-intro overview-intro">
+              <div class="intro-copy">
+                <div class="eyebrow"><i data-lucide="radar"></i> PERSONAL SAFETY COMMAND CONSOLE</div>
+                <h1 id="overview-title">准备好出发了吗？</h1>
+                <p id="overview-subtitle">
+                  将核心身份信息、实时 GPS 坐标与一键求助通道统一收拢，守护海外出行每一刻。
+                </p>
+              </div>
+              <div class="intro-date-badge">
+                <div class="date-flag">
+                  <span class="thai-flag" aria-hidden="true">🇹🇭</span>
+                  <span>泰国 · Thailand</span>
+                </div>
+                <strong id="today-date">2026年9月14日</strong>
+                <span class="date-status"><i data-lucide="signal"></i> 边缘节点正常</span>
+              </div>
+            </div>
+
+            <!-- 核心焦点网格：SOS报警 + 定位 & 准备度 -->
+            <div class="overview-hero-grid">
+              <!-- SOS 紧急呼救中心 -->
+              <section class="emergency-panel">
+                <div class="panel-glow-accent"></div>
+                <div class="panel-topline">
+                  <span class="eyebrow eyebrow-crimson"><i data-lucide="siren"></i> EMERGENCY COMMAND</span>
+                  <span class="mode-pill pulse"><span class="mode-dot"></span>安全待命中</span>
+                </div>
+                
+                <div class="emergency-copy">
+                  <h2>需要紧急援助时<br /><span class="gradient-crimson">一个动作，即刻响应</span></h2>
+                  <p>
+                    一键整合你的档案摘要、当前经纬度并进入警方（191/1155）与驻泰使馆求助流程。
+                  </p>
+                </div>
+
+                <div class="alert-button-area">
+                  <button
+                    id="alert-button"
+                    class="alert-button"
+                    type="button"
+                    aria-label="一键报警，获取定位并进入求助流程"
+                  >
+                    <span class="alert-radar-ring ring-1"></span>
+                    <span class="alert-radar-ring ring-2"></span>
+                    <span class="alert-radar-ring ring-3"></span>
+                    <span class="alert-button-inner">
+                      <span class="alert-button-sos">SOS</span>
+                      <span class="alert-button-label">一键紧急呼救</span>
+                      <span class="alert-button-sub">整理位置与档案 · 防误触保护</span>
+                    </span>
+                  </button>
+                  <span class="alert-button-note">
+                    <i data-lucide="shield-check"></i>
+                    双重防误触校验 · 点击后可选择直接拨号或复制短信
+                  </span>
+                </div>
+
+                <div class="emergency-footer">
+                  <div class="emergency-footer-item">
+                    <i data-lucide="radio-tower"></i>
+                    <div>
+                      <span>接入环境</span>
+                      <strong>Cloudflare Edge 边缘托管</strong>
+                    </div>
+                  </div>
+                  <div class="emergency-footer-divider"></div>
+                  <div class="emergency-footer-item">
+                    <i data-lucide="shield-alert"></i>
+                    <div>
+                      <span>响应准备度</span>
+                      <strong id="response-readiness">待完善资料</strong>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <!-- 定位与准备度堆叠区 -->
+              <div class="overview-side-stack">
+                <!-- 实时高精度地图与坐标 -->
+                <section class="location-panel glass-card">
+                  <div class="section-heading">
+                    <div>
+                      <div class="eyebrow"><i data-lucide="map-pin"></i> LIVE LOCATION & TEAM RADAR</div>
+                      <h2>实时地理定位与同行雷达</h2>
+                    </div>
+                    <button id="location-toggle" class="button button-secondary button-compact" type="button">
+                      <i data-lucide="locate"></i>
+                      <span id="location-toggle-text">获取定位</span>
+                    </button>
+                  </div>
+
+                  <!-- 多人同行守护雷达小队栏 -->
+                  <div class="team-radar-bar">
+                    <div class="team-radar-meta">
+                      <span class="team-pill-tag"><i data-lucide="radio"></i> 守护小队</span>
+                      <strong id="team-room-code-badge">房间号 #666888</strong>
+                      <span class="team-online-badge" id="team-online-count"><i data-lucide="users"></i> 2人在线</span>
+                    </div>
+                    <div class="team-radar-actions">
+                      <button id="switch-team-btn" class="button button-outline button-compact" type="button">
+                        <i data-lucide="shuffle"></i>
+                        <span>切换/创建小队</span>
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <div class="map-wrapper">
+                    <div id="map" class="map-canvas" aria-label="实时位置地图"></div>
+                    <div class="map-overlay-badge" id="map-country-badge">
+                      <span>🇹🇭 曼谷 (Bangkok)</span>
+                    </div>
+                  </div>
+
+                  <div class="map-caption">
+                    <span id="location-state" class="map-state">
+                      <span class="status-dot status-dot-neutral"></span>
+                      <span>等待获取精确定位</span>
+                    </span>
+                  </div>
+
+                  <div class="location-data-grid">
+                    <div class="data-cell">
+                      <span class="cell-label">我的纬度 Latitude</span>
+                      <strong id="location-lat" class="mono-value">--</strong>
+                    </div>
+                    <div class="data-cell">
+                      <span class="cell-label">我的经度 Longitude</span>
+                      <strong id="location-lng" class="mono-value">--</strong>
+                    </div>
+                    <div class="data-cell">
+                      <span class="cell-label">定位精度 Accuracy</span>
+                      <strong id="location-accuracy" class="mono-value">--</strong>
+                    </div>
+                    <div class="data-cell">
+                      <span class="cell-label">更新时间 Timestamp</span>
+                      <strong id="location-updated" class="mono-value">尚未获取</strong>
+                    </div>
+                  </div>
+
+                  <!-- 队友实时相对距离与坐标展示卡 -->
+                  <div class="team-members-wrapper">
+                    <div class="team-members-head">
+                      <span class="head-title"><i data-lucide="radar"></i> 同行队友实时位置与相对距离</span>
+                      <span class="head-status" id="team-sync-indicator"><span class="dot-beacon"></span>5秒同步中</span>
+                    </div>
+                    <div id="team-members-list" class="team-members-list">
+                      <!-- 动态渲染所有小队成员 -->
+                    </div>
+                  </div>
+                </section>
+
+                <!-- 出发前就绪度评估 -->
+                <section class="readiness-panel glass-card">
+                  <div class="section-heading section-heading-tight">
+                    <div>
+                      <div class="eyebrow"><i data-lucide="activity"></i> READINESS SCORE</div>
+                      <h2>出行安全就绪度</h2>
+                    </div>
+                    <div class="readiness-badge">
+                      <span id="readiness-value" class="readiness-value">0%</span>
+                    </div>
+                  </div>
+
+                  <div class="progress-track-wrapper">
+                    <div class="progress-track">
+                      <span id="readiness-progress" style="width: 0%"></span>
+                    </div>
+                  </div>
+
+                  <div class="checklist" id="readiness-checklist">
+                    <div class="checklist-item" id="check-profile-item">
+                      <span class="check-icon" data-check="profile"><i data-lucide="circle"></i></span>
+                      <div class="check-info">
+                        <strong>个人档案</strong>
+                        <span class="check-desc">姓名、年龄、国内电话、住址</span>
+                      </div>
+                      <small id="check-profile-count">0 / 4 项</small>
+                    </div>
+
+                    <div class="checklist-item" id="check-contacts-item">
+                      <span class="check-icon" data-check="contacts"><i data-lucide="circle"></i></span>
+                      <div class="check-info">
+                        <strong>紧急联系人</strong>
+                        <span class="check-desc">建议录入至少 2 位直系亲属或同行者</span>
+                      </div>
+                      <small id="check-contacts-count">0 / 5 位</small>
+                    </div>
+
+                    <div class="checklist-item" id="check-location-item">
+                      <span class="check-icon" data-check="location"><i data-lucide="circle"></i></span>
+                      <div class="check-info">
+                        <strong>实时 GPS 定位</strong>
+                        <span class="check-desc">求助时需自动附带准确坐标</span>
+                      </div>
+                      <small id="check-location-text">未获取</small>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </div>
+
+            <!-- 下半部分：快捷官方通道 + 求助信息预览 -->
+            <div class="overview-content-grid">
+              <!-- 快捷官方求助通道 -->
+              <section class="channel-panel glass-card">
+                <div class="section-heading">
+                  <div>
+                    <div class="eyebrow"><i data-lucide="phone-incoming"></i> OFFICIAL DIRECT DIAL</div>
+                    <h2>官方救援直连通道</h2>
+                  </div>
+                  <span class="section-helper">点击直接拨号 (无需网络)</span>
+                </div>
+
+                <div class="channel-list">
+                  <article class="channel-row">
+                    <div class="channel-icon channel-icon-red">
+                      <i data-lucide="phone-call"></i>
+                    </div>
+                    <div class="channel-copy">
+                      <div class="channel-title-row">
+                        <strong>泰国警方报警</strong>
+                        <span class="channel-badge channel-badge-red">立即响应</span>
+                      </div>
+                      <span>Police Emergency · 191 (全境覆盖)</span>
+                    </div>
+                    <a class="channel-action-btn btn-call" href="tel:191" aria-label="拨打泰国警方 191">
+                      <i data-lucide="phone"></i>
+                      <span>拨打 191</span>
+                    </a>
+                  </article>
+
+                  <article class="channel-row">
+                    <div class="channel-icon channel-icon-blue">
+                      <i data-lucide="languages"></i>
+                    </div>
+                    <div class="channel-copy">
+                      <div class="channel-title-row">
+                        <strong>泰国旅游警察</strong>
+                        <span class="channel-badge channel-badge-blue">官方中文服务</span>
+                      </div>
+                      <span>Tourist Police · 1155 (涉外游客援助优先)</span>
+                    </div>
+                    <a class="channel-action-btn btn-call" href="tel:1155" aria-label="拨打旅游警察 1155">
+                      <i data-lucide="phone"></i>
+                      <span>拨打 1155</span>
+                    </a>
+                  </article>
+
+                  <article class="channel-row">
+                    <div class="channel-icon channel-icon-green">
+                      <i data-lucide="landmark"></i>
+                    </div>
+                    <div class="channel-copy">
+                      <div class="channel-title-row">
+                        <strong>中国驻泰使馆领事保护</strong>
+                        <span class="channel-badge channel-badge-green">领事直通</span>
+                      </div>
+                      <span>24小时领保协助热线 · +66 2 245 7010</span>
+                    </div>
+                    <a class="channel-action-btn btn-call" href="tel:+6622457010" aria-label="拨打中国驻泰使馆领保电话">
+                      <i data-lucide="phone"></i>
+                      <span>直拨使馆</span>
+                    </a>
+                  </article>
+
+                  <article class="channel-row">
+                    <div class="channel-icon channel-icon-amber">
+                      <i data-lucide="ambulance"></i>
+                    </div>
+                    <div class="channel-copy">
+                      <div class="channel-title-row">
+                        <strong>泰国国家急救救援中心</strong>
+                        <span class="channel-badge channel-badge-amber">医疗急救</span>
+                      </div>
+                      <span>Medical Emergency · 1669 (伤病救护车调度)</span>
+                    </div>
+                    <a class="channel-action-btn btn-call" href="tel:1669" aria-label="拨打医疗急救 1669">
+                      <i data-lucide="phone"></i>
+                      <span>呼叫急救</span>
+                    </a>
+                  </article>
+                </div>
+              </section>
+
+              <!-- 求助应急数据包 -->
+              <section class="payload-panel glass-card">
+                <div class="section-heading">
+                  <div>
+                    <div class="eyebrow"><i data-lucide="file-text"></i> RESCUE PAYLOAD</div>
+                    <h2>求助信息包摘要</h2>
+                  </div>
+                  <button id="open-payload" class="text-button" type="button">
+                    <i data-lucide="copy"></i>
+                    <span>复制求助报文</span>
+                  </button>
+                </div>
+
+                <p class="payload-intro">
+                  触发紧急流程时，将自动组装以下格式化求助报文供你一键发送至紧急联系人或警方。
+                </p>
+
+                <div class="payload-tags">
+                  <span class="payload-tag"><i data-lucide="user-check"></i> 身份档案</span>
+                  <span class="payload-tag"><i data-lucide="crosshair"></i> GPS 精准定位</span>
+                  <span class="payload-tag"><i data-lucide="users"></i> 联系人网</span>
+                  <span class="payload-tag"><i data-lucide="map"></i> 谷歌地图直链</span>
+                </div>
+
+                <div class="payload-preview">
+                  <div class="payload-preview-top">
+                    <span class="payload-live-indicator"><span class="dot-beacon"></span>实时动态封装</span>
+                    <span id="payload-updated">等待完善资料</span>
+                  </div>
+                  <div class="payload-line">
+                    <span class="p-label">求助人员</span>
+                    <strong id="payload-name" class="p-value">未填写姓名</strong>
+                  </div>
+                  <div class="payload-line">
+                    <span class="p-label">当前位置</span>
+                    <strong id="payload-location" class="p-value">坐标待获取</strong>
+                  </div>
+                  <div class="payload-line">
+                    <span class="p-label">紧急联络</span>
+                    <strong id="payload-contacts" class="p-value">0 位联系人已同步</strong>
+                  </div>
+                </div>
+
+                <button id="edit-profile-from-payload" class="button button-outline button-full" type="button" data-view="profile">
+                  <i data-lucide="user-pen"></i>
+                  <span>前往完善档案与联系人</span>
+                </button>
+              </section>
+            </div>
+
+            <!-- 隐私合规底条 -->
+            <div class="privacy-strip">
+              <div class="privacy-strip-icon"><i data-lucide="shield-check"></i></div>
+              <div class="privacy-strip-copy">
+                <strong>你的数据完全掌握在自己手中</strong>
+                <span>护途遵循端侧加密与本地优先存储原则，资料保存在本设备，绝不在无授权情况下擅自上传。</span>
+              </div>
+              <button class="text-button" type="button" data-view="settings">
+                <span>查看隐私设置</span>
+                <i data-lucide="arrow-right"></i>
+              </button>
+            </div>
+          </section>
+
+          <!-- 2. 实时同行雷达与独立定位中心 (Standalone Live Radar Module) -->
+          <section class="view-panel" data-view-panel="radar" hidden>
+            <div class="page-intro">
+              <div class="intro-copy">
+                <div class="eyebrow"><i data-lucide="radio"></i> LIVE GPS RADAR & TEAM SQUAD</div>
+                <h1>实时同行雷达中心</h1>
+                <p>全域高精度卫星地图 · 多人实时相对距离 · 专属自定义房间号与同行安全网。</p>
+              </div>
+              <div class="page-intro-actions">
+                <span class="save-state" id="radar-room-badge"><i data-lucide="hash"></i> 房间号 #666888</span>
+                <button id="radar-open-room-modal-btn" class="button button-primary button-compact" type="button">
+                  <i data-lucide="plus-circle"></i>
+                  <span>创建 / 切换房间</span>
+                </button>
+                <div class="radar-roster-dropdown-wrapper">
+                  <button
+                    id="radar-roster-pill-btn"
+                    class="radar-roster-pill"
+                    type="button"
+                    aria-haspopup="true"
+                    aria-expanded="false"
+                    title="点击展开查看在线队友花名册"
+                  >
+                    <span class="status-dot status-dot-active"></span>
+                    <i data-lucide="users"></i>
+                    <span id="radar-roster-pill-text">2人在线</span>
+                    <i data-lucide="chevron-down" class="pill-chevron"></i>
+                  </button>
+
+                  <div id="radar-roster-popover" class="radar-roster-popover glass-card" hidden>
+                    <div class="roster-popover-header">
+                      <div class="roster-popover-title">
+                        <i data-lucide="users"></i>
+                        <span>同房成员与相对距离</span>
+                      </div>
+                      <div style="display: flex; align-items: center; gap: 8px;">
+                        <span class="roster-popover-badge" id="radar-roster-count"><i data-lucide="users"></i> 2人在线</span>
+                        <button id="radar-close-popover-btn" class="roster-popover-close" type="button" aria-label="收起在线列表" title="收起列表">
+                          <i data-lucide="x"></i>
+                        </button>
+                      </div>
+                    </div>
+                    <div class="roster-popover-tips">
+                      <span>点击成员卡片可快速在地图中定位聚焦</span>
+                    </div>
+                    <div class="radar-roster-list" id="radar-roster-list">
+                      <!-- 动态生成队友卡片 -->
+                    </div>
+                    <div class="roster-popover-footer">
+                      <button id="radar-collapse-popover-btn" class="button button-secondary button-compact" type="button" style="width: 100%; justify-content: center;">
+                        <i data-lucide="chevron-up"></i>
+                        <span>收起在线成员列表</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="radar-layout">
+              <!-- 全景雷达大地图 (100% 全宽大屏) -->
+              <div class="radar-map-card glass-card">
+                <div class="radar-map-toolbar">
+                  <div class="radar-toolbar-left">
+                    <button id="radar-locate-me-btn" class="button button-primary button-compact" type="button">
+                      <i data-lucide="crosshair"></i>
+                      <span>聚焦我的位置</span>
+                    </button>
+                    <button id="radar-calibrate-btn" class="button button-outline button-compact" type="button" title="点击后拖拽头像或点击地图任意位置微调校准定位">
+                      <i data-lucide="map-pin"></i>
+                      <span id="radar-calibrate-btn-text">微调校准</span>
+                    </button>
+                    <button id="radar-fit-bounds-btn" class="button button-secondary button-compact" type="button">
+                      <i data-lucide="maximize-2"></i>
+                      <span>自适应全员视野</span>
+                    </button>
+                    <button id="radar-refresh-gps-btn" class="button button-outline button-compact" type="button">
+                      <i data-lucide="rotate-cw"></i>
+                      <span>高德高精刷新</span>
+                    </button>
+                    <button id="radar-copy-invite-btn" class="button button-secondary button-compact" type="button">
+                      <i data-lucide="share-2"></i>
+                      <span>分享实时追踪链接</span>
+                    </button>
+                  </div>
+                  <div class="radar-toolbar-right">
+                    <span class="radar-gps-indicator" id="radar-gps-status">
+                      <span class="status-dot status-dot-active"></span>
+                      <span id="radar-gps-status-text">高德高精定位就绪</span>
+                    </span>
+                  </div>
+                </div>
+
+                <div class="radar-map-wrapper">
+                  <!-- 专属动态实时追踪浮动横幅 (当通过分享链接进入时自动激活) -->
+                  <div id="radar-live-tracking-banner" class="radar-live-tracking-banner" hidden>
+                    <div class="tracking-banner-left">
+                      <span class="tracking-pulse-dot"></span>
+                      <div class="tracking-banner-text">
+                        <strong id="tracking-banner-title">正在实时动态追踪成员位置</strong>
+                        <span id="tracking-banner-sub">实时心跳同步中...</span>
+                      </div>
+                    </div>
+                    <div class="tracking-banner-actions">
+                      <a id="tracking-call-btn" href="#" class="button button-primary button-compact" style="display:none;">
+                        <i data-lucide="phone"></i>
+                        <span>呼叫TA</span>
+                      </a>
+                      <a id="tracking-nav-btn" href="#" target="_blank" class="button button-outline button-compact">
+                        <i data-lucide="navigation"></i>
+                        <span>导航去TA</span>
+                      </a>
+                      <button id="tracking-focus-btn" class="button button-secondary button-compact" type="button">
+                        <i data-lucide="crosshair"></i>
+                        <span>锁定视野</span>
+                      </button>
+                      <button id="tracking-exit-btn" class="icon-button" type="button" aria-label="关闭追踪横幅">
+                        <i data-lucide="x"></i>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div id="radar-fullscreen-map" class="radar-map-canvas" aria-label="全景同行雷达地图"></div>
+                  <div class="radar-map-overlay-info">
+                    <div class="radar-stat-box">
+                      <small>我的纬度</small>
+                      <strong id="radar-stat-lat">--</strong>
+                    </div>
+                    <div class="radar-stat-divider"></div>
+                    <div class="radar-stat-box">
+                      <small>我的经度</small>
+                      <strong id="radar-stat-lng">--</strong>
+                    </div>
+                    <div class="radar-stat-divider"></div>
+                    <div class="radar-stat-box">
+                      <small>精度误差</small>
+                      <strong id="radar-stat-acc">±20m</strong>
+                    </div>
+                    <div class="radar-stat-divider" id="radar-stat-addr-divider" style="display:none;"></div>
+                    <div class="radar-stat-box" id="radar-stat-addr-box" style="display:none;">
+                      <small>实测门牌/地标</small>
+                      <strong id="radar-stat-addr" style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;">--</strong>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- 3. 个人档案面板 -->
+          <section class="view-panel" data-view-panel="profile" hidden>
+            <div class="page-intro">
+              <div class="intro-copy">
+                <div class="eyebrow"><i data-lucide="id-card"></i> PASSPORT & IDENTITY</div>
+                <h1>我的安全档案</h1>
+                <p>保存一份随时可在紧急情况下核验身份、提供给警方或使馆的出行档案。</p>
+              </div>
+              <div class="page-intro-actions">
+                <span class="save-state" id="profile-save-state"><i data-lucide="hard-drive"></i> 本机存储中</span>
+                <button class="button button-primary" type="submit" form="profile-form">
+                  <i data-lucide="save"></i>
+                  <span>保存个人档案</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="profile-layout">
+              <form id="profile-form" class="form-panel glass-card" autocomplete="on">
+                <div class="form-panel-header">
+                  <div>
+                    <div class="eyebrow"><i data-lucide="user"></i> BASIC DETAILS</div>
+                    <h2>身份基础信息</h2>
+                  </div>
+                  <span class="required-note"><span class="star">*</span> 标星为必填</span>
+                </div>
+
+                <div class="form-grid">
+                  <label class="field">
+                    <span class="field-label">姓名 <em>*</em></span>
+                    <div class="field-control">
+                      <i data-lucide="user-round"></i>
+                      <input id="profile-name" name="name" type="text" placeholder="例如：张三 / San Zhang" required maxlength="40" />
+                    </div>
+                  </label>
+
+                  <label class="field">
+                    <span class="field-label">年龄 <em>*</em></span>
+                    <div class="field-control">
+                      <i data-lucide="calendar-days"></i>
+                      <input id="profile-age" name="age" type="number" inputmode="numeric" min="1" max="120" placeholder="例如：28" required />
+                      <small class="field-unit">岁</small>
+                    </div>
+                  </label>
+
+                  <label class="field field-span-2">
+                    <span class="field-label">手机号码 <em>*</em></span>
+                    <div class="field-control">
+                      <i data-lucide="phone"></i>
+                      <input id="profile-phone" name="phone" type="tel" inputmode="tel" placeholder="例如：+86 138 0000 0000 (含国际区号)" required maxlength="30" />
+                    </div>
+                  </label>
+
+                  <label class="field field-span-2">
+                    <span class="field-label">国内家庭常住地址 <em>*</em></span>
+                    <div class="field-control field-control-textarea">
+                      <i data-lucide="home"></i>
+                      <textarea id="profile-address" name="address" rows="3" placeholder="填写国内常住地址，供使领馆在紧急情况下联系户籍地核验身份" required maxlength="160"></textarea>
+                    </div>
+                  </label>
+
+                  <label class="field">
+                    <span class="field-label">护照号码后四位 (可选)</span>
+                    <div class="field-control">
+                      <i data-lucide="file-badge"></i>
+                      <input id="profile-passport" name="passport" type="text" placeholder="例如：8892 (便于核对)" maxlength="10" />
+                    </div>
+                  </label>
+
+                  <label class="field">
+                    <span class="field-label">血型 / 既往过敏史 (可选)</span>
+                    <div class="field-control">
+                      <i data-lucide="heart-pulse"></i>
+                      <input id="profile-medical" name="medical" type="text" placeholder="例如：O型 / 青霉素过敏" maxlength="50" />
+                    </div>
+                  </label>
+                </div>
+
+                <div class="form-footnote">
+                  <i data-lucide="info"></i>
+                  <span>这些信息仅在点击报警并由你确认后生成报文；请放心填写真实信息。</span>
+                </div>
+              </form>
+
+              <!-- 右侧卡片拟态预览 -->
+              <aside class="profile-side">
+                <section class="identity-preview glass-card-hologram">
+                  <div class="hologram-line"></div>
+                  <div class="preview-top">
+                    <span class="preview-badge"><i data-lucide="shield-check"></i> 护途 · 行程安全通行卡</span>
+                    <span class="chip-icon"></span>
+                  </div>
+                  
+                  <div class="identity-preview-main">
+                    <div class="avatar-upload-box" id="avatar-upload-trigger" title="点击上传真实照片">
+                      <div id="profile-preview-avatar" class="avatar avatar-large">旅</div>
+                      <span class="avatar-upload-badge"><i data-lucide="camera"></i></span>
+                      <input type="file" id="avatar-file-input" accept="image/*" hidden />
+                    </div>
+                    <div class="preview-meta">
+                      <strong id="profile-preview-name">尚未设置姓名</strong>
+                      <div class="preview-tags">
+                        <span id="profile-preview-age" class="tag-pill">年龄待填</span>
+                        <span id="profile-preview-medical" class="tag-pill">医疗备注正常</span>
+                      </div>
+                      <button type="button" id="trigger-avatar-btn" class="text-button text-button-sm">
+                        <i data-lucide="upload-cloud"></i>
+                        <span>上传真实自拍照</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="identity-preview-lines">
+                    <div class="identity-preview-line">
+                      <i data-lucide="phone"></i>
+                      <span id="profile-preview-phone">联系电话待填写</span>
+                    </div>
+                    <div class="identity-preview-line">
+                      <i data-lucide="map-pin"></i>
+                      <span id="profile-preview-address">国内地址待填写</span>
+                    </div>
+                  </div>
+
+                  <div class="preview-secure">
+                    <i data-lucide="lock"></i>
+                    <span>本地沙箱加密保存 · 离线随时可用</span>
+                  </div>
+                </section>
+
+                <section class="tip-panel glass-card">
+                  <div class="tip-number">01</div>
+                  <div class="tip-body">
+                    <strong>填写真实姓名与常住地址的意义</strong>
+                    <p>当海外遇险或通信受限时，中国驻泰使馆与国内公安部门需依据国内地址和户籍信息快速协调亲友核验。</p>
+                  </div>
+                </section>
+              </aside>
+            </div>
+          </section>
+
+          <!-- 3. 紧急联系人面板 -->
+          <section class="view-panel" data-view-panel="contacts" hidden>
+            <div class="page-intro">
+              <div class="intro-copy">
+                <div class="eyebrow"><i data-lucide="users"></i> EMERGENCY CONTACT MATRIX</div>
+                <h1>紧急联系人名录</h1>
+                <p>最多支持配置 5 位紧急联系人，报警流程中可一键将你的实时定位与求助信息打包分享。</p>
+              </div>
+              <div class="page-intro-actions">
+                <span class="contact-count" id="contact-count">0 / 5 已保存</span>
+                <button class="button button-primary" type="submit" form="contacts-form">
+                  <i data-lucide="save"></i>
+                  <span>保存联系人名录</span>
+                </button>
+              </div>
+            </div>
+
+            <form id="contacts-form" class="contacts-form">
+              <div class="contacts-toolbar glass-card">
+                <div class="contacts-toolbar-copy">
+                  <div class="toolbar-icon"><i data-lucide="user-plus"></i></div>
+                  <div>
+                    <strong>家人、朋友与同行伙伴网络</strong>
+                    <span>推荐配置：至少 1 位直系家属 + 1 位泰国本地同行者或酒店向导。</span>
+                  </div>
+                </div>
+                <button id="add-contact-btn" class="button button-secondary button-compact" type="button">
+                  <i data-lucide="plus"></i>
+                  <span>添加联系人</span>
+                </button>
+              </div>
+
+              <!-- 动态联系人卡片网格 -->
+              <div id="contacts-grid" class="contacts-grid"></div>
+
+              <div class="contacts-footnote">
+                <i data-lucide="shield-alert"></i>
+                <span>紧急联系人信息将在点击一键求助时载入快速短信分享列表，请确保所填手机号随时畅通。</span>
+              </div>
+            </form>
+          </section>
+
+          <!-- 4. 安全设置面板 -->
+          <section class="view-panel" data-view-panel="settings" hidden>
+            <div class="page-intro">
+              <div class="intro-copy">
+                <div class="eyebrow"><i data-lucide="sliders"></i> SYSTEM & PRIVACY</div>
+                <h1>系统安全设置</h1>
+                <p>管理高精度地理追踪、官方号码核验与本机存储数据。</p>
+              </div>
+            </div>
+
+            <div class="settings-layout">
+              <div class="settings-main">
+                <!-- 定位管理 -->
+                <section class="settings-section glass-card">
+                  <div class="settings-section-header">
+                    <div class="settings-heading-icon icon-green"><i data-lucide="map-pin"></i></div>
+                    <div>
+                      <h2>实时地理定位权限</h2>
+                      <p>启用浏览器的高精度 GPS 与 Wi-Fi 信号定位，用于遇险时精确定位。</p>
+                    </div>
+                    <button id="settings-location-toggle" class="toggle-switch" type="button" role="switch" aria-checked="false" aria-label="开启高精度定位">
+                      <span class="toggle-knob"></span>
+                    </button>
+                  </div>
+                  <div class="settings-detail-row">
+                    <span>当前定位状态</span>
+                    <strong id="settings-location-state" class="status-badge-neutral">尚未授权开启</strong>
+                  </div>
+                  <div class="settings-detail-row">
+                    <span>定位精度偏好</span>
+                    <strong>High Accuracy (最高精度优先)</strong>
+                  </div>
+                </section>
+
+                <!-- Cloudflare Workers 边缘中继与接口服务 -->
+                <section class="settings-section glass-card">
+                  <div class="settings-section-header">
+                    <div class="settings-heading-icon icon-blue"><i data-lucide="cloud"></i></div>
+                    <div>
+                      <h2>Cloudflare Edge 边缘托管</h2>
+                      <p>当前系统运行在 Cloudflare 全球 300+ 边缘数据中心节点上。</p>
+                    </div>
+                    <span class="integration-badge badge-active"><i data-lucide="check"></i> 边缘运行中</span>
+                  </div>
+                  <div class="integration-list">
+                    <div class="integration-row">
+                      <span class="int-label"><i data-lucide="zap"></i> 边缘极速就绪 API</span>
+                      <strong class="int-status text-emerald">/api/health 正常</strong>
+                    </div>
+                    <div class="integration-row">
+                      <span class="int-label"><i data-lucide="message-square"></i> 紧急短信网关接口</span>
+                      <strong class="int-status">准备接入 (下一步扩展)</strong>
+                    </div>
+                    <div class="integration-row">
+                      <span class="int-label"><i data-lucide="bot"></i> Telegram / LINE 报警机器人</span>
+                      <strong class="int-status">预留扩展槽位</strong>
+                    </div>
+                  </div>
+                </section>
+
+                <!-- 危险区域：重置所有数据 -->
+                <section class="settings-section glass-card danger-section">
+                  <div class="settings-section-header">
+                    <div class="settings-heading-icon icon-red"><i data-lucide="trash-2"></i></div>
+                    <div>
+                      <h2>清除本地所有数据</h2>
+                      <p>彻底清除本地存储中的个人档案、紧急联系人与历史定位缓存。</p>
+                    </div>
+                    <button id="clear-data" class="button button-danger button-compact" type="button">
+                      <i data-lucide="trash-2"></i>
+                      <span>清除数据</span>
+                    </button>
+                  </div>
+                </section>
+              </div>
+
+              <!-- 右侧官方电话备忘 -->
+              <aside class="settings-aside">
+                <section class="settings-source glass-card-dark">
+                  <div class="eyebrow eyebrow-light"><i data-lucide="book-open"></i> OFFICIAL DIRECTORY</div>
+                  <h2>泰国官方应急名录</h2>
+                  <p>整理自中国驻泰使领馆及泰国旅游局官方公示信息：</p>
+                  
+                  <div class="source-list">
+                    <div class="source-item">
+                      <div class="source-info">
+                        <strong>泰国全境报警</strong>
+                        <span>交通事故、刑事治安案件</span>
+                      </div>
+                      <a href="tel:191" class="source-call-badge">191</a>
+                    </div>
+
+                    <div class="source-item">
+                      <div class="source-info">
+                        <strong>泰国旅游警察 (含中文)</strong>
+                        <span>涉外纠纷、行李遗失、被困</span>
+                      </div>
+                      <a href="tel:1155" class="source-call-badge">1155</a>
+                    </div>
+
+                    <div class="source-item">
+                      <div class="source-info">
+                        <strong>中国驻泰使馆领保电话</strong>
+                        <span>护照紧急补发、公民人身安全</span>
+                      </div>
+                      <a href="tel:+6622457010" class="source-call-badge">+66 2 245 7010</a>
+                    </div>
+
+                    <div class="source-item">
+                      <div class="source-info">
+                        <strong>外交部全球领保服务热线</strong>
+                        <span>北京 24 小时应急呼叫</span>
+                      </div>
+                      <a href="tel:+861012308" class="source-call-badge">+86 10 12308</a>
+                    </div>
+
+                    <div class="source-item">
+                      <div class="source-info">
+                        <strong>泰国国家急救调度中心</strong>
+                        <span>救护车与现场医护调度</span>
+                      </div>
+                      <a href="tel:1669" class="source-call-badge">1669</a>
+                    </div>
+                  </div>
+
+                  <a class="source-link" href="https://th.china-embassy.gov.cn/" target="_blank" rel="noreferrer">
+                    <span>访问中国驻泰王国大使馆官网</span>
+                    <i data-lucide="external-link"></i>
+                  </a>
+                </section>
+              </aside>
+            </div>
+          </section>
+        </div>
+
+        <footer class="app-footer">
+          <div class="footer-left">
+            <span>护途安全中心 · THAILAND TRAVEL SAFETY CONSOLE</span>
+            <span class="footer-sep">·</span>
+            <span>Cloudflare Workers Powered</span>
+          </div>
+          <div class="footer-status">
+            <span class="live-dot"></span>
+            <span>边缘服务就绪 (Edge Online)</span>
+          </div>
+        </footer>
+      </main>
+    </div>
+
+    <!-- 移动端底部快捷悬浮坞 (Mobile Bottom Nav Dock) -->
+    <nav class="mobile-dock" aria-label="移动快捷导航">
+      <button class="mobile-dock-btn active" type="button" data-view="overview">
+        <i data-lucide="layout-dashboard"></i>
+        <span>中控</span>
+      </button>
+      <button class="mobile-dock-btn" type="button" data-view="radar">
+        <i data-lucide="radar"></i>
+        <span>雷达</span>
+      </button>
+      <button class="mobile-dock-btn mobile-dock-sos" type="button" id="mobile-dock-sos" aria-label="紧急求救">
+        <div class="dock-sos-circle">
+          <span>SOS</span>
+        </div>
+      </button>
+      <button class="mobile-dock-btn" type="button" data-view="profile">
+        <i data-lucide="id-card"></i>
+        <span>档案</span>
+      </button>
+      <button class="mobile-dock-btn" type="button" data-view="contacts">
+        <i data-lucide="users"></i>
+        <span>联系人</span>
+      </button>
+    </nav>
+
+    <!-- SOS 双重确认与调度弹窗 -->
+    <div id="alert-modal" class="modal-backdrop" hidden>
+      <div class="modal glass-card-modal" role="dialog" aria-modal="true" aria-labelledby="alert-modal-title">
+        <div class="modal-header">
+          <div class="modal-title-group">
+            <div class="eyebrow eyebrow-crimson"><i data-lucide="alert-triangle"></i> EMERGENCY DISPATCH</div>
+            <h3 id="alert-modal-title">紧急求助呼叫与报文确认</h3>
+          </div>
+          <button id="close-alert-modal" class="icon-button" type="button" aria-label="关闭求助弹窗">
+            <i data-lucide="x"></i>
+          </button>
+        </div>
+
+        <div id="alert-modal-content" class="modal-body">
+          <!-- 动态注入求助调度内容：直接拨打官方热线、一键复制短信报文、分享给紧急联系人 -->
+        </div>
+      </div>
+    </div>
+
+    <!-- 纯数字简易登录与注册弹窗 -->
+    <div id="auth-modal" class="modal-backdrop" hidden>
+      <div class="modal glass-card-modal auth-modal-box" role="dialog" aria-modal="true" aria-labelledby="auth-modal-title">
+        <div class="modal-header">
+          <div class="modal-title-group">
+            <div class="eyebrow"><i data-lucide="fingerprint"></i> MINIMAL NUMERIC AUTH</div>
+            <h3 id="auth-modal-title">同行者账号登录 / 注册</h3>
+          </div>
+          <button id="close-auth-modal" class="icon-button" type="button" aria-label="关闭登录窗口">
+            <i data-lucide="x"></i>
+          </button>
+        </div>
+
+        <div class="modal-body">
+          <p class="auth-intro-note">
+            账号与密码支持纯数字、英文字母或任意字符组合（如手机号、昵称代码 <code>alex</code>、<code>888888</code> 等），无需复杂繁琐门槛，支持自动注册并极速登录。
+          </p>
+
+          <form id="auth-form" class="auth-form-layout">
+            <label class="field">
+              <span class="field-label">账号 (支持纯数字、字母或组合) <em>*</em></span>
+              <div class="field-control">
+                <i data-lucide="user"></i>
+                <input
+                  id="auth-username"
+                  name="username"
+                  type="text"
+                  placeholder="例如：888888 或 alex 或 手机号码"
+                  required
+                  minlength="2"
+                  maxlength="30"
+                />
+              </div>
+            </label>
+
+            <label class="field">
+              <span class="field-label">密码 (支持纯数字、字母或组合) <em>*</em></span>
+              <div class="field-control">
+                <i data-lucide="key-round"></i>
+                <input
+                  id="auth-password"
+                  name="password"
+                  type="password"
+                  placeholder="例如：123 或 pass123"
+                  required
+                  minlength="3"
+                  maxlength="30"
+                />
+              </div>
+            </label>
+
+            <label class="field">
+              <span class="field-label">旅行者称呼 (可选)</span>
+              <div class="field-control">
+                <i data-lucide="smile"></i>
+                <input
+                  id="auth-name"
+                  name="name"
+                  type="text"
+                  placeholder="例如：小林 / 旅行者阿强"
+                  maxlength="20"
+                />
+              </div>
+            </label>
+
+            <div class="auth-btn-stack">
+              <button id="auth-submit-btn" class="button button-primary button-full" type="submit">
+                <i data-lucide="log-in"></i>
+                <span>立即登录 / 自动注册加入</span>
+              </button>
+              <button id="auth-demo-btn" class="button button-secondary button-full" type="button">
+                <i data-lucide="sparkles"></i>
+                <span>一键填入演示向导账号 (888888 / 123)</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- 切换/加入小队房间号弹窗 -->
+    <div id="team-modal" class="modal-backdrop" hidden>
+      <div class="modal glass-card-modal auth-modal-box" role="dialog" aria-modal="true" aria-labelledby="team-modal-title">
+        <div class="modal-header">
+          <div class="modal-title-group">
+            <div class="eyebrow"><i data-lucide="users"></i> TRIP SQUAD RADAR</div>
+            <h3 id="team-modal-title">加入或创建同行守护小队</h3>
+          </div>
+          <button id="close-team-modal" class="icon-button" type="button" aria-label="关闭小队窗口">
+            <i data-lucide="x"></i>
+          </button>
+        </div>
+
+        <div class="modal-body">
+          <p class="auth-intro-note">
+            与同行朋友或导游输入相同的小队房间号（支持纯数字如 <code>666888</code> 或字母如 <code>TH888</code>），大家的手机地图将实时显示彼此的头像、经纬度与相对距离！
+          </p>
+
+          <form id="team-form" class="auth-form-layout">
+            <label class="field">
+              <span class="field-label">小队房间号 (Team Code，支持数字/字母) <em>*</em></span>
+              <div class="field-control">
+                <i data-lucide="radio"></i>
+                <input
+                  id="team-code-input"
+                  name="teamCode"
+                  type="text"
+                  placeholder="例如：666888 或 TH888 或自定房间码"
+                  required
+                  maxlength="20"
+                  value="666888"
+                />
+              </div>
+            </label>
+
+            <div class="auth-btn-stack">
+              <button class="button button-primary button-full" type="submit">
+                <i data-lucide="check"></i>
+                <span>确认进入该小队并开启全员雷达</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast 消息通知容器 -->
+    <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+    <!-- 第三方核心依赖 (Leaflet 地图 + Lucide 高清矢量图标) -->
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      crossorigin=""
+    ></script>
+    <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

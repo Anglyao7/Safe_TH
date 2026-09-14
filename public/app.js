@@ -1,0 +1,2291 @@
+/**
+ * 护途 · 泰国行程安全中心 (HuTu Thailand Safety Console)
+ * 前端核心业务与交互驱动
+ */
+
+(function () {
+  'use strict';
+
+  // ==========================================
+  // 1. 本地存储数据模型与默认状态
+  // ==========================================
+  const STORAGE_KEYS = {
+    PROFILE: 'hutu_profile',
+    CONTACTS: 'hutu_contacts',
+    SETTINGS: 'hutu_settings',
+    LAST_LOCATION: 'hutu_last_location',
+    THEME: 'hutu_theme',
+    AUTH_TOKEN: 'hutu_auth_token',
+    AUTH_USER: 'hutu_auth_user',
+    TEAM_CODE: 'hutu_team_code',
+  };
+
+  const DEFAULT_BANGKOK = {
+    lat: 13.7563,
+    lng: 100.5018,
+    accuracy: 25,
+    city: '曼谷 (Bangkok)',
+  };
+
+  const MAP_TILES = {
+    DARK: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    LIGHT: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+  };
+
+  let state = {
+    theme: 'dark',
+    user: null,
+    token: null,
+    teamCode: '666888',
+    teamMembers: [],
+    overviewTeamMarkers: new Map(),
+    radarMap: null,
+    radarMarker: null,
+    radarTileLayer: null,
+    radarTeamMarkers: new Map(),
+    profile: {
+      name: '',
+      age: '',
+      phone: '',
+      address: '',
+      passport: '',
+      medical: '',
+      avatar: '',
+    },
+    contacts: [
+      {
+        id: '1',
+        name: '紧急联系人1',
+        relation: '直系亲属/父母',
+        phone: '',
+        isPrimary: true,
+      },
+      {
+        id: '2',
+        name: '同行伙伴/酒店',
+        relation: '同伴/导游',
+        phone: '',
+        isPrimary: false,
+      },
+    ],
+    location: {
+      lat: null,
+      lng: null,
+      accuracy: null,
+      updated: null,
+      granted: false,
+    },
+    settings: {
+      highAccuracy: true,
+    },
+    map: null,
+    tileLayer: null,
+    marker: null,
+  };
+
+  // ==========================================
+  // 2. 初始化与生命周期
+  // ==========================================
+  document.addEventListener('DOMContentLoaded', () => {
+    loadLocalData();
+    initTheme();
+    initIcons();
+    initAuthSystem();
+    initNavigation();
+    initMap();
+    initRadarMap();
+    initProfileForm();
+    initContactsManager();
+    initEmergencyModal();
+    initSettingsView();
+    initTeamSystem();
+    initImageUpload();
+    initLiveTrackingViewer();
+    updateAllViews();
+    fetchBackendHealth();
+
+    // 默认尝试定位
+    requestGeolocation(false);
+  });
+
+  function initIcons() {
+    if (window.lucide && typeof window.lucide.createIcons === 'function') {
+      window.lucide.createIcons();
+    }
+  }
+
+  // ==========================================
+  // 3. 数据持久化与状态恢复
+  // ==========================================
+  function loadLocalData() {
+    try {
+      const savedProfile = localStorage.getItem(STORAGE_KEYS.PROFILE);
+      if (savedProfile) {
+        state.profile = { ...state.profile, ...JSON.parse(savedProfile) };
+      }
+
+      const savedContacts = localStorage.getItem(STORAGE_KEYS.CONTACTS);
+      if (savedContacts) {
+        const parsed = JSON.parse(savedContacts);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          state.contacts = parsed;
+        }
+      }
+
+      const savedLoc = localStorage.getItem(STORAGE_KEYS.LAST_LOCATION);
+      if (savedLoc) {
+        const parsedLoc = JSON.parse(savedLoc);
+        state.location = { ...state.location, ...parsedLoc };
+      }
+
+      const savedToken = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+      const savedUser = localStorage.getItem(STORAGE_KEYS.AUTH_USER);
+      if (savedToken && savedUser) {
+        state.token = savedToken;
+        state.user = JSON.parse(savedUser);
+      }
+
+      const savedTeam = localStorage.getItem(STORAGE_KEYS.TEAM_CODE);
+      if (savedTeam) {
+        state.teamCode = savedTeam;
+      }
+    } catch (e) {
+      console.warn('读取本地存储异常:', e);
+    }
+  }
+
+  function saveProfileData() {
+    try {
+      localStorage.setItem(STORAGE_KEYS.PROFILE, JSON.stringify(state.profile));
+      updateAllViews();
+      showToast('个人安全档案已更新并加密存储在本地');
+    } catch (e) {
+      showToast('存储档案失败', 'error');
+    }
+  }
+
+  function saveContactsData() {
+    try {
+      localStorage.setItem(STORAGE_KEYS.CONTACTS, JSON.stringify(state.contacts));
+      updateAllViews();
+      showToast('紧急联系人名单已成功保存');
+    } catch (e) {
+      showToast('保存联系人失败', 'error');
+    }
+  }
+
+  // ==========================================
+  // 主题切换系统 (深色护盾 / 浅色日光)
+  // ==========================================
+  function initTheme() {
+    let savedTheme = 'dark';
+    try {
+      const stored = localStorage.getItem(STORAGE_KEYS.THEME);
+      if (stored) {
+        savedTheme = stored;
+      } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+        savedTheme = 'light';
+      }
+    } catch (e) {}
+
+    setTheme(savedTheme, false);
+
+    // 绑定顶部栏切换按钮
+    const topThemeBtn = document.getElementById('theme-toggle');
+    if (topThemeBtn) {
+      topThemeBtn.addEventListener('click', () => {
+        const nextTheme = state.theme === 'light' ? 'dark' : 'light';
+        setTheme(nextTheme, true);
+      });
+    }
+  }
+
+  function setTheme(theme, save = true) {
+    const isLight = theme === 'light';
+    state.theme = theme;
+    document.documentElement.setAttribute('data-theme', theme);
+
+    // 更新顶栏按钮图标与浮窗说明
+    const themeBtn = document.getElementById('theme-toggle');
+    if (themeBtn) {
+      themeBtn.setAttribute('title', isLight ? '切换为深色护盾外观' : '切换为浅色日光外观');
+      themeBtn.innerHTML = `<i data-lucide="${isLight ? 'moon' : 'sun'}" id="theme-toggle-icon"></i>`;
+    }
+
+    // 联动 Leaflet 地图瓦片色彩
+    if (state.tileLayer) {
+      state.tileLayer.setUrl(isLight ? MAP_TILES.LIGHT : MAP_TILES.DARK);
+    }
+    if (state.radarTileLayer) {
+      state.radarTileLayer.setUrl(isLight ? MAP_TILES.LIGHT : MAP_TILES.DARK);
+    }
+
+    if (save) {
+      try {
+        localStorage.setItem(STORAGE_KEYS.THEME, theme);
+      } catch (e) {}
+      showToast(isLight ? '已切换至清爽日光浅色模式' : '已切换至深曜石护盾暗色模式');
+    }
+
+    initIcons();
+  }
+
+  // ==========================================
+  // 4. 视图导航切换
+  // ==========================================
+  function initNavigation() {
+    const navItems = document.querySelectorAll('[data-view]');
+    const viewPanels = document.querySelectorAll('[data-view-panel]');
+    const currentLabel = document.getElementById('current-view-label');
+    const mobileMenuBtn = document.getElementById('mobile-menu-btn');
+    const sidebar = document.getElementById('sidebar');
+
+    const viewNames = {
+      overview: '总览中控',
+      radar: '实时定位雷达',
+      profile: '我的安全档案',
+      contacts: '紧急联系人',
+      settings: '安全设置',
+    };
+
+    function switchView(targetView) {
+      if (!viewNames[targetView]) return;
+
+      // 更新按钮激活态
+      document.querySelectorAll('[data-view]').forEach((btn) => {
+        if (btn.getAttribute('data-view') === targetView) {
+          btn.classList.add('active');
+        } else {
+          btn.classList.remove('active');
+        }
+      });
+
+      // 切换视图面板
+      viewPanels.forEach((panel) => {
+        if (panel.getAttribute('data-view-panel') === targetView) {
+          panel.removeAttribute('hidden');
+          panel.classList.add('active');
+        } else {
+          panel.setAttribute('hidden', '');
+          panel.classList.remove('active');
+        }
+      });
+
+      if (currentLabel) {
+        currentLabel.textContent = viewNames[targetView];
+      }
+
+      // 移动端关闭侧边栏
+      if (sidebar) {
+        sidebar.classList.remove('open');
+      }
+
+      // 如果切到总览或雷达，重新调整地图尺寸
+      if (targetView === 'overview' && state.map) {
+        requestAnimationFrame(() => state.map?.invalidateSize());
+        setTimeout(() => state.map?.invalidateSize(), 100);
+        setTimeout(() => state.map?.invalidateSize(), 300);
+      } else if (targetView === 'radar' && state.radarMap) {
+        requestAnimationFrame(() => state.radarMap?.invalidateSize());
+        setTimeout(() => state.radarMap?.invalidateSize(), 100);
+        setTimeout(() => state.radarMap?.invalidateSize(), 300);
+      }
+
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    navItems.forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const view = btn.getAttribute('data-view');
+        if (view) {
+          e.preventDefault();
+          switchView(view);
+        }
+      });
+    });
+
+    // 移动端汉堡菜单
+    if (mobileMenuBtn && sidebar) {
+      mobileMenuBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        sidebar.classList.toggle('open');
+      });
+
+      document.addEventListener('click', (e) => {
+        if (!sidebar.contains(e.target) && !mobileMenuBtn.contains(e.target)) {
+          sidebar.classList.remove('open');
+        }
+      });
+    }
+  }
+
+  // ==========================================
+  // 5. Leaflet 暗色地图与高精度地理定位
+  // ==========================================
+  function initMap() {
+    const mapContainer = document.getElementById('map');
+    if (!mapContainer || !window.L) return;
+
+    const initialLat = state.location.lat || DEFAULT_BANGKOK.lat;
+    const initialLng = state.location.lng || DEFAULT_BANGKOK.lng;
+
+    state.map = L.map('map', {
+      zoomControl: false,
+      attributionControl: false,
+    }).setView([initialLat, initialLng], 12);
+
+    // 地图主题瓦片（根据深浅色动态加载 CartoDB Dark Matter / Positron）
+    state.tileLayer = L.tileLayer(
+      state.theme === 'light' ? MAP_TILES.LIGHT : MAP_TILES.DARK,
+      {
+        subdomains: 'abcd',
+        maxZoom: 19,
+      }
+    ).addTo(state.map);
+
+    // 定制高科技脉冲标记
+    const pulseIcon = L.divIcon({
+      className: 'custom-map-pulse',
+      html: `
+        <div style="position: relative; width: 22px; height: 22px;">
+          <div style="width: 14px; height: 14px; background: #10B981; border: 2px solid #fff; border-radius: 50%; box-shadow: 0 0 10px #10B981; position: absolute; top: 4px; left: 4px; z-index: 2;"></div>
+          <div style="width: 22px; height: 22px; background: rgba(16, 185, 129, 0.4); border-radius: 50%; animation: radar-ping 1.8s infinite; position: absolute;"></div>
+        </div>
+      `,
+      iconSize: [22, 22],
+      iconAnchor: [11, 11],
+    });
+
+    state.marker = L.marker([initialLat, initialLng], { icon: pulseIcon }).addTo(state.map);
+
+    // 定位主切换按钮与状态指示胶囊
+    const toggleBtn = document.getElementById('location-toggle');
+    const topLocStatus = document.getElementById('top-location-status');
+
+    if (toggleBtn) {
+      toggleBtn.addEventListener('click', () => requestGeolocation(true));
+    }
+    if (topLocStatus) {
+      topLocStatus.addEventListener('click', () => requestGeolocation(true));
+    }
+
+    if (window.ResizeObserver) {
+      const resizeObserver = new ResizeObserver(() => {
+        if (state.map && mapContainer.offsetWidth > 0 && mapContainer.offsetHeight > 0) {
+          state.map.invalidateSize();
+        }
+      });
+      resizeObserver.observe(mapContainer);
+    }
+  }
+
+  // ==========================================
+  // 高德地图开放平台高精定位与坐标转换系统
+  // Leaflet OSM 底图采用 WGS-84，高德在中国境内采用火星坐标 GCJ-02
+  // ==========================================
+  let amapGeolocationInstance = null;
+  let amapGeocoderInstance = null;
+  let isCalibrating = false;
+
+  function isChinaCoordinate(lng, lat, addressCountry) {
+    if (addressCountry) {
+      return addressCountry === '中国' || addressCountry === 'China';
+    }
+    if (lat < 18.0 || lat > 54.0 || lng < 73.0 || lng > 135.5) return false;
+    if (lat < 21.2 && lng < 107.5) return false;
+    return true;
+  }
+
+  function transformLat(x, y) {
+    let ret = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x));
+    ret += ((20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2.0) / 3.0;
+    ret += ((20.0 * Math.sin(y * Math.PI) + 40.0 * Math.sin((y / 3.0) * Math.PI)) * 2.0) / 3.0;
+    ret += ((160.0 * Math.sin((y / 12.0) * Math.PI) + 320 * Math.sin((y * Math.PI) / 30.0)) * 2.0) / 3.0;
+    return ret;
+  }
+
+  function transformLng(x, y) {
+    let ret = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x));
+    ret += ((20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2.0) / 3.0;
+    ret += ((20.0 * Math.sin(x * Math.PI) + 40.0 * Math.sin((x / 3.0) * Math.PI)) * 2.0) / 3.0;
+    ret += ((150.0 * Math.sin((x / 12.0) * Math.PI) + 300.0 * Math.sin((x / 30.0) * Math.PI)) * 2.0) / 3.0;
+    return ret;
+  }
+
+  function gcj02ToWgs84(lng, lat) {
+    const a = 6378245.0;
+    const ee = 0.00669342162296594323;
+    if (!isChinaCoordinate(lng, lat)) {
+      return { lng, lat };
+    }
+    let dLat = transformLat(lng - 105.0, lat - 35.0);
+    let dLng = transformLng(lng - 105.0, lat - 35.0);
+    const radLat = (lat / 180.0) * Math.PI;
+    let magic = Math.sin(radLat);
+    magic = 1 - ee * magic * magic;
+    const sqrtMagic = Math.sqrt(magic);
+    dLat = (dLat * 180.0) / (((a * (1 - ee)) / (magic * sqrtMagic)) * Math.PI);
+    dLng = (dLng * 180.0) / ((a / sqrtMagic) * Math.cos(radLat) * Math.PI);
+    const mgLat = lat + dLat;
+    const mgLng = lng + dLng;
+    return {
+      lng: Number((lng * 2 - mgLng).toFixed(6)),
+      lat: Number((lat * 2 - mgLat).toFixed(6)),
+    };
+  }
+
+  function wgs84ToGcj02(lng, lat) {
+    const a = 6378245.0;
+    const ee = 0.00669342162296594323;
+    if (!isChinaCoordinate(lng, lat)) {
+      return { lng, lat };
+    }
+    let dLat = transformLat(lng - 105.0, lat - 35.0);
+    let dLng = transformLng(lng - 105.0, lat - 35.0);
+    const radLat = (lat / 180.0) * Math.PI;
+    let magic = Math.sin(radLat);
+    magic = 1 - ee * magic * magic;
+    const sqrtMagic = Math.sqrt(magic);
+    dLat = (dLat * 180.0) / (((a * (1 - ee)) / (magic * sqrtMagic)) * Math.PI);
+    dLng = (dLng * 180.0) / ((a / sqrtMagic) * Math.cos(radLat) * Math.PI);
+    return {
+      lng: Number((lng + dLng).toFixed(6)),
+      lat: Number((lat + dLat).toFixed(6)),
+    };
+  }
+
+  function initAMapGeolocation() {
+    if (window.AMap && window.AMap.Geolocation && !amapGeolocationInstance) {
+      try {
+        amapGeolocationInstance = new AMap.Geolocation({
+          enableHighAccuracy: true,
+          timeout: 10000,
+          needAddress: true,
+          extensions: 'all',
+          noIpLocate: 0,
+          noGeoLocation: 0,
+        });
+      } catch (e) {
+        console.warn('高德定位插件初始化未就绪:', e);
+      }
+    }
+    if (window.AMap && window.AMap.Geocoder && !amapGeocoderInstance) {
+      try {
+        amapGeocoderInstance = new AMap.Geocoder();
+      } catch (e) {}
+    }
+  }
+
+  function reverseGeocodeLocation(lat, lng) {
+    if (!amapGeocoderInstance && window.AMap && window.AMap.Geocoder) {
+      try {
+        amapGeocoderInstance = new AMap.Geocoder();
+      } catch (e) {}
+    }
+    if (amapGeocoderInstance) {
+      let queryLng = lng;
+      let queryLat = lat;
+      if (isChinaCoordinate(lng, lat)) {
+        const gcj = wgs84ToGcj02(lng, lat);
+        queryLng = gcj.lng;
+        queryLat = gcj.lat;
+      }
+      amapGeocoderInstance.getAddress([queryLng, queryLat], (status, result) => {
+        if (status === 'complete' && result.regeocode) {
+          const addr = result.regeocode.formattedAddress;
+          const comp = result.regeocode.addressComponent;
+          const city = comp ? (comp.city || comp.province || '') : '';
+          if (addr) {
+            state.location.address = addr;
+            if (city) state.location.city = city;
+            updateLocationUI();
+          }
+        }
+      });
+    }
+  }
+
+  function applyLocationToMaps(lat, lng) {
+    const newLatLng = [lat, lng];
+    if (state.map && state.marker) {
+      state.marker.setLatLng(newLatLng);
+      state.map.setView(newLatLng, 15);
+    }
+    if (state.radarMap) {
+      updateMyRadarMarker();
+      state.radarMap.setView(newLatLng, 15);
+    }
+  }
+
+  function applyManualCalibration(lat, lng) {
+    const nowStr = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+    state.location = {
+      ...state.location,
+      lat: Number(lat.toFixed(6)),
+      lng: Number(lng.toFixed(6)),
+      accuracy: 5,
+      updated: nowStr,
+      granted: true,
+      source: 'manual',
+    };
+
+    reverseGeocodeLocation(lat, lng);
+
+    try {
+      localStorage.setItem(STORAGE_KEYS.LAST_LOCATION, JSON.stringify(state.location));
+    } catch (e) {}
+
+    applyLocationToMaps(lat, lng);
+    updateLocationUI();
+    updateReadinessScore();
+
+    if (state.user) {
+      reportMyLocation();
+    }
+
+    showToast(`定位已精准对齐至：[${lat.toFixed(4)}, ${lng.toFixed(4)}] (全队已同步)`);
+  }
+
+  function handleAMapLocationSuccess(result, manualTrigger) {
+    const rawLng = result.position.lng;
+    const rawLat = result.position.lat;
+    const country = result.addressComponent ? result.addressComponent.country : '';
+
+    let finalLng = rawLng;
+    let finalLat = rawLat;
+    if (isChinaCoordinate(rawLng, rawLat, country)) {
+      const wgs = gcj02ToWgs84(rawLng, rawLat);
+      finalLng = wgs.lng;
+      finalLat = wgs.lat;
+    }
+
+    const accuracy = Math.round(result.accuracy || 20);
+    const nowStr = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+    const formattedAddress = result.formattedAddress || '';
+    const comp = result.addressComponent;
+    const city = comp ? (comp.city || comp.province || '') : '';
+
+    state.location = {
+      lat: Number(finalLat.toFixed(6)),
+      lng: Number(finalLng.toFixed(6)),
+      accuracy: accuracy,
+      updated: nowStr,
+      granted: true,
+      source: 'amap',
+      address: formattedAddress,
+      city: city,
+    };
+
+    try {
+      localStorage.setItem(STORAGE_KEYS.LAST_LOCATION, JSON.stringify(state.location));
+    } catch (e) {}
+
+    applyLocationToMaps(finalLat, finalLng);
+
+    const toggleText = document.getElementById('location-toggle-text');
+    if (toggleText) toggleText.textContent = '高德高精刷新';
+
+    if (manualTrigger) {
+      showToast(`高德高精定位已锁定！(误差约 ±${accuracy}米${formattedAddress ? ` · ${formattedAddress}` : ''})`);
+    }
+
+    updateLocationUI();
+    updateReadinessScore();
+
+    if (state.user) {
+      reportMyLocation();
+    }
+  }
+
+  function requestNativeGeolocation(manualTrigger) {
+    if (!navigator.geolocation) {
+      const stateEl = document.getElementById('location-state');
+      if (stateEl) stateEl.innerHTML = '<span class="status-dot status-dot-warn"></span><span>设备不支持定位</span>';
+      if (manualTrigger) showToast('当前设备或浏览器不支持定位 API', 'error');
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude, longitude, accuracy } = pos.coords;
+        const nowStr = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+
+        state.location = {
+          lat: Number(latitude.toFixed(6)),
+          lng: Number(longitude.toFixed(6)),
+          accuracy: Math.round(accuracy),
+          updated: nowStr,
+          granted: true,
+          source: 'gps',
+          address: '',
+          city: '',
+        };
+
+        reverseGeocodeLocation(latitude, longitude);
+
+        try {
+          localStorage.setItem(STORAGE_KEYS.LAST_LOCATION, JSON.stringify(state.location));
+        } catch (e) {}
+
+        applyLocationToMaps(latitude, longitude);
+
+        const toggleText = document.getElementById('location-toggle-text');
+        if (toggleText) toggleText.textContent = '刷新定位';
+        if (manualTrigger) showToast(`GPS 定位已更新 (误差约 ±${Math.round(accuracy)}米)`);
+
+        updateLocationUI();
+        updateReadinessScore();
+
+        if (state.user) {
+          reportMyLocation();
+        }
+      },
+      (err) => {
+        console.warn('浏览器原生定位获取失败:', err.message);
+        state.location.granted = false;
+
+        const stateEl = document.getElementById('location-state');
+        const topText = document.getElementById('top-location-text');
+        const topDot = document.getElementById('top-location-dot');
+
+        if (stateEl) {
+          stateEl.innerHTML = '<span class="status-dot status-dot-neutral"></span><span>采用默认曼谷坐标</span>';
+        }
+        if (topText) topText.textContent = '泰国曼谷 (默认)';
+        if (topDot) {
+          topDot.className = 'status-dot status-dot-warn';
+        }
+        if (manualTrigger) {
+          showToast('无法获取精确定位，已回退至曼谷基准点', 'error');
+        }
+
+        updateLocationUI();
+        updateReadinessScore();
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 12000,
+        maximumAge: 0,
+      }
+    );
+  }
+
+  function requestGeolocation(manualTrigger = false) {
+    const stateEl = document.getElementById('location-state');
+    const topText = document.getElementById('top-location-text');
+
+    if (stateEl) stateEl.innerHTML = '<span class="status-dot status-dot-warn"></span><span>正在调用高德高精度定位...</span>';
+    if (topText) topText.textContent = '高德定位中...';
+
+    // 优先调用高德开放平台 AMap.Geolocation
+    if (window.AMap && window.AMap.Geolocation) {
+      if (!amapGeolocationInstance) {
+        initAMapGeolocation();
+      }
+
+      if (amapGeolocationInstance) {
+        amapGeolocationInstance.getCurrentPosition((status, result) => {
+          if (status === 'complete' && result.position) {
+            handleAMapLocationSuccess(result, manualTrigger);
+          } else {
+            console.warn('高德定位未完全返回，回退至原生浏览器定位:', result);
+            requestNativeGeolocation(manualTrigger);
+          }
+        });
+        return;
+      }
+    }
+
+    // 回退到原生定位
+    requestNativeGeolocation(manualTrigger);
+  }
+
+  function updateLocationUI() {
+    const latEl = document.getElementById('location-lat');
+    const lngEl = document.getElementById('location-lng');
+    const accEl = document.getElementById('location-accuracy');
+    const updatedEl = document.getElementById('location-updated');
+    const stateEl = document.getElementById('location-state');
+    const topText = document.getElementById('top-location-text');
+    const topDot = document.getElementById('top-location-dot');
+    const pill = document.getElementById('top-location-status');
+    const checkLocText = document.getElementById('check-location-text');
+    const checkLocIcon = document.querySelector('[data-check="location"]');
+    const settingsLocState = document.getElementById('settings-location-state');
+
+    const hasCoords = state.location.lat !== null;
+
+    if (latEl) latEl.textContent = hasCoords ? state.location.lat : '--';
+    if (lngEl) lngEl.textContent = hasCoords ? state.location.lng : '--';
+    if (accEl) accEl.textContent = hasCoords ? `±${state.location.accuracy} 米` : '--';
+    if (updatedEl) updatedEl.textContent = state.location.updated || '尚未获取';
+
+    const radarLat = document.getElementById('radar-stat-lat');
+    const radarLng = document.getElementById('radar-stat-lng');
+    const radarAcc = document.getElementById('radar-stat-acc');
+    const radarGpsStatusText = document.getElementById('radar-gps-status-text');
+    const radarAddrBox = document.getElementById('radar-stat-addr-box');
+    const radarAddrText = document.getElementById('radar-stat-addr');
+    const radarAddrDivider = document.getElementById('radar-stat-addr-divider');
+
+    if (radarLat) radarLat.textContent = hasCoords ? state.location.lat : DEFAULT_BANGKOK.lat;
+    if (radarLng) radarLng.textContent = hasCoords ? state.location.lng : DEFAULT_BANGKOK.lng;
+    if (radarAcc) radarAcc.textContent = hasCoords ? `±${state.location.accuracy}m` : '±20m';
+
+    if (radarAddrBox && radarAddrText) {
+      if (state.location.address) {
+        radarAddrBox.style.display = 'block';
+        if (radarAddrDivider) radarAddrDivider.style.display = 'block';
+        radarAddrText.textContent = state.location.address;
+        radarAddrText.title = state.location.address;
+      } else {
+        radarAddrBox.style.display = 'none';
+        if (radarAddrDivider) radarAddrDivider.style.display = 'none';
+      }
+    }
+
+    if (radarGpsStatusText) {
+      if (state.location.source === 'amap') {
+        radarGpsStatusText.textContent = `高德高精定位已锁定 (±${state.location.accuracy}m)`;
+      } else if (state.location.source === 'manual') {
+        radarGpsStatusText.textContent = `手动校准锁定 (±5m)`;
+      } else if (state.location.granted) {
+        radarGpsStatusText.textContent = `高精定位已锁定 (±${state.location.accuracy}m)`;
+      } else {
+        radarGpsStatusText.textContent = '高德高精定位就绪';
+      }
+    }
+
+    if (state.location.granted) {
+      const sourceBadge = state.location.source === 'amap' ? '高德高精已锁定' : (state.location.source === 'manual' ? '手动校准锁定' : '高精度 GPS 锁定');
+      if (stateEl) stateEl.innerHTML = `<span class="status-dot status-dot-active"></span><span>${sourceBadge}</span>`;
+      if (topText) {
+        topText.textContent = state.location.city || (state.location.address ? state.location.address.slice(0, 10) + '...' : `${state.location.lat}, ${state.location.lng}`);
+      }
+      if (topDot) topDot.className = 'status-dot status-dot-active';
+      if (pill) pill.classList.add('active');
+      if (checkLocText) checkLocText.textContent = '已获取';
+      if (checkLocIcon) checkLocIcon.innerHTML = '<i data-lucide="check-circle-2"></i>';
+      if (settingsLocState) {
+        settingsLocState.className = 'text-emerald';
+        settingsLocState.textContent = '已授权高精定位 (高德/GPS)';
+      }
+    } else {
+      if (checkLocText) checkLocText.textContent = '未授权';
+      if (checkLocIcon) checkLocIcon.innerHTML = '<i data-lucide="circle"></i>';
+      if (settingsLocState) {
+        settingsLocState.className = 'status-badge-neutral';
+        settingsLocState.textContent = '未开启定位授权';
+      }
+    }
+
+    initIcons();
+  }
+
+  // ==========================================
+  // 6. 出行就绪度打分 (Readiness Score)
+  // ==========================================
+  function updateReadinessScore() {
+    const { name, age, phone, address } = state.profile;
+    let profileFilled = 0;
+    if (name.trim()) profileFilled++;
+    if (age) profileFilled++;
+    if (phone.trim()) profileFilled++;
+    if (address.trim()) profileFilled++;
+
+    const contactsValid = state.contacts.filter((c) => c.name.trim() && c.phone.trim()).length;
+    const locationReady = state.location.granted ? 1 : 0;
+
+    // 权重计算 (满分 100%)
+    // 档案: 40% (每项 10%)
+    // 联系人: 40% (每位 20%，最多 2 位即达 40%)
+    // 定位: 20%
+    const scoreProfile = profileFilled * 10;
+    const scoreContacts = Math.min(contactsValid * 20, 40);
+    const scoreLocation = locationReady * 20;
+
+    const totalScore = scoreProfile + scoreContacts + scoreLocation;
+
+    const readinessVal = document.getElementById('readiness-value');
+    const readinessProgress = document.getElementById('readiness-progress');
+    const responseReadiness = document.getElementById('response-readiness');
+    const checkProfileCount = document.getElementById('check-profile-count');
+    const checkContactsCount = document.getElementById('check-contacts-count');
+    const checkProfileItem = document.getElementById('check-profile-item');
+    const checkContactsItem = document.getElementById('check-contacts-item');
+    const checkLocationItem = document.getElementById('check-location-item');
+
+    if (readinessVal) readinessVal.textContent = `${totalScore}%`;
+    if (readinessProgress) readinessProgress.style.width = `${totalScore}%`;
+
+    if (responseReadiness) {
+      if (totalScore >= 80) {
+        responseReadiness.textContent = '完备就绪';
+        responseReadiness.style.color = 'var(--emerald-400)';
+      } else if (totalScore >= 40) {
+        responseReadiness.textContent = '基本可用';
+        responseReadiness.style.color = 'var(--amber-400)';
+      } else {
+        responseReadiness.textContent = '待完善资料';
+        responseReadiness.style.color = 'var(--crimson-400)';
+      }
+    }
+
+    if (checkProfileCount) checkProfileCount.textContent = `${profileFilled} / 4 项`;
+    if (checkContactsCount) checkContactsCount.textContent = `${contactsValid} / 5 位`;
+
+    const iconProfile = document.querySelector('[data-check="profile"]');
+    const iconContacts = document.querySelector('[data-check="contacts"]');
+
+    if (profileFilled >= 4) {
+      checkProfileItem?.classList.add('done');
+      if (iconProfile) iconProfile.innerHTML = '<i data-lucide="check-circle-2"></i>';
+    } else {
+      checkProfileItem?.classList.remove('done');
+      if (iconProfile) iconProfile.innerHTML = '<i data-lucide="circle"></i>';
+    }
+
+    if (contactsValid >= 2) {
+      checkContactsItem?.classList.add('done');
+      if (iconContacts) iconContacts.innerHTML = '<i data-lucide="check-circle-2"></i>';
+    } else {
+      checkContactsItem?.classList.remove('done');
+      if (iconContacts) iconContacts.innerHTML = '<i data-lucide="circle"></i>';
+    }
+
+    if (locationReady) {
+      checkLocationItem?.classList.add('done');
+    } else {
+      checkLocationItem?.classList.remove('done');
+    }
+
+    initIcons();
+  }
+
+  // ==========================================
+  // 7. 个人档案表单与全息卡片联动
+  // ==========================================
+  function initProfileForm() {
+    const form = document.getElementById('profile-form');
+    if (!form) return;
+
+    // 填充已有数据
+    ['name', 'age', 'phone', 'address', 'passport', 'medical'].forEach((field) => {
+      const input = document.getElementById(`profile-${field}`);
+      if (input && state.profile[field]) {
+        input.value = state.profile[field];
+      }
+    });
+
+    // 实时联动右侧预览
+    form.addEventListener('input', (e) => {
+      const { name, value } = e.target;
+      if (name && state.profile.hasOwnProperty(name)) {
+        state.profile[name] = value;
+        updateProfileUI();
+      }
+    });
+
+    // 保存档案
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      saveProfileData();
+    });
+  }
+
+  function updateProfileUI() {
+    const { name, age, phone, address, medical } = state.profile;
+
+    // 侧边栏
+    const sideName = document.getElementById('sidebar-profile-name');
+    const sidePhone = document.getElementById('sidebar-profile-phone');
+    const sideAvatar = document.getElementById('sidebar-avatar');
+
+    const avatarHtml = state.profile.avatar
+      ? `<img src="${state.profile.avatar}" alt="头像" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`
+      : (name ? name.charAt(0) : '旅');
+
+    if (sideName) sideName.textContent = name || '还没有档案';
+    if (sidePhone) sidePhone.textContent = phone || '未填写联络手机';
+    if (sideAvatar) sideAvatar.innerHTML = avatarHtml;
+
+    // 档案面板预览卡
+    const prevName = document.getElementById('profile-preview-name');
+    const prevAge = document.getElementById('profile-preview-age');
+    const prevPhone = document.getElementById('profile-preview-phone');
+    const prevAddress = document.getElementById('profile-preview-address');
+    const prevMedical = document.getElementById('profile-preview-medical');
+    const prevAvatar = document.getElementById('profile-preview-avatar');
+
+    if (prevName) prevName.textContent = name || '尚未设置姓名';
+    if (prevAge) prevAge.textContent = age ? `${age} 岁` : '年龄待填';
+    if (prevPhone) prevPhone.textContent = phone || '联系电话待填写';
+    if (prevAddress) prevAddress.textContent = address || '国内常住住址待填写';
+    if (prevMedical) prevMedical.textContent = medical || '医疗备注正常';
+    if (prevAvatar) prevAvatar.innerHTML = avatarHtml;
+
+    // 总览求助报文摘要
+    const pName = document.getElementById('payload-name');
+    const pLoc = document.getElementById('payload-location');
+    const pContacts = document.getElementById('payload-contacts');
+
+    if (pName) pName.textContent = name ? `${name} (${age || '--'}岁)` : '未填写姓名';
+    if (pLoc) {
+      pLoc.textContent = state.location.lat
+        ? `${state.location.lat}, ${state.location.lng}`
+        : '泰国曼谷基准点 (待授权GPS)';
+    }
+    const validCount = state.contacts.filter((c) => c.name.trim() && c.phone.trim()).length;
+    if (pContacts) pContacts.textContent = `${validCount} 位联系人已同步`;
+
+    updateReadinessScore();
+    updateMyRadarMarker();
+  }
+
+  // ==========================================
+  // 8. 紧急联系人动态增删改
+  // ==========================================
+  function initContactsManager() {
+    const form = document.getElementById('contacts-form');
+    const addBtn = document.getElementById('add-contact-btn');
+
+    renderContacts();
+
+    if (addBtn) {
+      addBtn.addEventListener('click', () => {
+        if (state.contacts.length >= 5) {
+          showToast('最多可添加 5 位紧急联系人', 'error');
+          return;
+        }
+
+        state.contacts.push({
+          id: Date.now().toString(),
+          name: '',
+          relation: '朋友 / 同行者',
+          phone: '',
+          isPrimary: false,
+        });
+
+        renderContacts();
+        showToast('已新增联系人卡片，请填写信息');
+      });
+    }
+
+    if (form) {
+      form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        saveContactsData();
+      });
+    }
+  }
+
+  function renderContacts() {
+    const grid = document.getElementById('contacts-grid');
+    const countEl = document.getElementById('contact-count');
+    if (!grid) return;
+
+    grid.innerHTML = '';
+
+    const validCount = state.contacts.filter((c) => c.name.trim() && c.phone.trim()).length;
+    if (countEl) countEl.textContent = `${validCount} / 5 已保存`;
+
+    state.contacts.forEach((contact, index) => {
+      const card = document.createElement('div');
+      card.className = 'contact-card';
+      card.innerHTML = `
+        <div class="contact-card-header">
+          <div class="contact-card-title">
+            <span>#0${index + 1}</span>
+            <strong>${contact.name || '新联系人'}</strong>
+            ${contact.isPrimary ? '<span class="contact-badge-primary">第一顺位</span>' : ''}
+          </div>
+          ${
+            state.contacts.length > 1
+              ? `<button class="icon-button icon-button-subtle delete-contact-btn" type="button" data-index="${index}" title="删除联系人">
+                   <i data-lucide="trash-2"></i>
+                 </button>`
+              : ''
+          }
+        </div>
+
+        <div class="contact-inputs">
+          <div class="contact-input-row">
+            <input class="contact-input" type="text" placeholder="姓名 (如：父亲)" value="${escapeHtml(
+              contact.name
+            )}" data-field="name" data-index="${index}" required />
+            <input class="contact-input" type="text" placeholder="关系 (如：家人)" value="${escapeHtml(
+              contact.relation
+            )}" data-field="relation" data-index="${index}" />
+          </div>
+          <input class="contact-input" type="tel" placeholder="电话号码 (+86 / +66)" value="${escapeHtml(
+            contact.phone
+          )}" data-field="phone" data-index="${index}" required />
+        </div>
+
+        <div class="contact-card-actions">
+          <button type="button" class="text-button set-primary-btn" data-index="${index}">
+            <i data-lucide="${contact.isPrimary ? 'star' : 'star-off'}"></i>
+            <span>${contact.isPrimary ? '设为优先首要联系人' : '设为第一顺位'}</span>
+          </button>
+        </div>
+      `;
+      grid.appendChild(card);
+    });
+
+    // 绑定事件
+    grid.querySelectorAll('.contact-input').forEach((input) => {
+      input.addEventListener('input', (e) => {
+        const idx = Number(e.target.getAttribute('data-index'));
+        const field = e.target.getAttribute('data-field');
+        if (state.contacts[idx] && field) {
+          state.contacts[idx][field] = e.target.value;
+          updateReadinessScore();
+        }
+      });
+    });
+
+    grid.querySelectorAll('.delete-contact-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const idx = Number(btn.getAttribute('data-index'));
+        if (state.contacts.length <= 1) {
+          showToast('至少保留 1 位联系人', 'error');
+          return;
+        }
+        state.contacts.splice(idx, 1);
+        renderContacts();
+        updateReadinessScore();
+      });
+    });
+
+    grid.querySelectorAll('.set-primary-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const idx = Number(btn.getAttribute('data-index'));
+        state.contacts.forEach((c, i) => {
+          c.isPrimary = i === idx;
+        });
+        renderContacts();
+      });
+    });
+
+    initIcons();
+  }
+
+  // ==========================================
+  // 9. SOS 一键报警与求助调度流程
+  // ==========================================
+  function getMyLiveTrackingUrl() {
+    const myUsername = (state.user && state.user.username) || (state.profile.phone) || (state.profile.name) || 'guest';
+    const cleanOrigin = window.location.origin;
+    const cleanPath = window.location.pathname.replace(/\/+$/, '');
+    const url = new URL(`${cleanOrigin}${cleanPath}/`);
+    url.searchParams.set('track', myUsername);
+    if (state.teamCode) {
+      url.searchParams.set('room', state.teamCode);
+    }
+    return url.toString();
+  }
+
+  function generateSosPayloadText() {
+    const { name, age, phone, address, passport, medical } = state.profile;
+    const lat = state.location.lat || DEFAULT_BANGKOK.lat;
+    const lng = state.location.lng || DEFAULT_BANGKOK.lng;
+    const accuracy = state.location.accuracy || '估测';
+    const googleMapUrl = `https://www.google.com/maps?q=${lat},${lng}`;
+    const liveTrackingUrl = getMyLiveTrackingUrl();
+
+    const contactStr = state.contacts
+      .filter((c) => c.name && c.phone)
+      .map((c) => `${c.name}(${c.relation}): ${c.phone}`)
+      .join('; ') || '未填写';
+
+    return `【护途紧急求救 / THAILAND SOS】
+求助人员: ${name || '中国公民'} (年龄: ${age || '--'}岁)
+护照后四位: ${passport || '未备'}
+本人联系电话: ${phone || '见本机'}
+国内常住地址: ${address || '见护照/户籍'}
+医疗/过敏说明: ${medical || '无特殊'}
+当前定位坐标: ${lat}, ${lng} (误差范围 ±${accuracy}m)
+
+🌐 护途专属实时动态追踪链接 (点击随时查看最新移动轨迹与相对距离):
+${liveTrackingUrl}
+
+📍 谷歌地图基准点 (备用导航):
+${googleMapUrl}
+
+国内紧急联系人: ${contactStr}
+求救发出时间: ${new Date().toLocaleString('zh-CN')}
+※ 提示：此求救信息由本人通过护途泰国安全中心生成，请点击实时追踪链接查看我的最新动态轨迹并协助报警！`;
+  }
+
+  function initEmergencyModal() {
+    const alertBtn = document.getElementById('alert-button');
+    const dockSosBtn = document.getElementById('mobile-dock-sos');
+    const modal = document.getElementById('alert-modal');
+    const closeBtn = document.getElementById('close-alert-modal');
+    const modalContent = document.getElementById('alert-modal-content');
+    const openPayloadBtn = document.getElementById('open-payload');
+
+    function openSosModal() {
+      const payloadText = generateSosPayloadText();
+
+      // 触感震动 (移动设备)
+      if (navigator.vibrate) {
+        navigator.vibrate([200, 100, 200]);
+      }
+
+      if (modalContent) {
+        modalContent.innerHTML = `
+          <div class="modal-alert-box">
+            <strong><i data-lucide="siren"></i> 确认启动紧急求助流程？</strong>
+            <p>已自动打包当前 GPS 定位与个人身份档案，并生成了<b>包含本站专属实时动态追踪链接</b>的结构化报文，亲友打开链接即可实时查看你的最新移动轨迹。</p>
+          </div>
+
+          <div style="margin-bottom: 0.85rem; font-size: 0.8rem; color: var(--text-muted);">
+            <span>自动生成的结构化求救报文预览：</span>
+          </div>
+
+          <pre class="modal-payload-box">${escapeHtml(payloadText)}</pre>
+
+          <div class="modal-actions">
+            <button id="modal-copy-btn" class="button button-primary button-full" type="button">
+              <i data-lucide="copy"></i>
+              <span>一键复制完整求助报文 (含实时动态追踪链接)</span>
+            </button>
+
+            <button id="modal-copy-track-btn" class="button button-secondary button-full" type="button" style="border-color: rgba(16, 185, 129, 0.4); color: var(--emerald-400);">
+              <i data-lucide="share-2"></i>
+              <span>仅复制我的专属实时追踪网址链接 (发微信/群聊)</span>
+            </button>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.65rem;">
+              <a href="tel:191" class="button button-secondary" style="border-color: rgba(239, 68, 68, 0.4); color: var(--crimson-400);">
+                <i data-lucide="phone"></i>
+                <span>拨打 191 (警方)</span>
+              </a>
+              <a href="tel:1155" class="button button-secondary" style="border-color: rgba(59, 130, 246, 0.4); color: var(--blue-400);">
+                <i data-lucide="languages"></i>
+                <span>拨打 1155 (中文)</span>
+              </a>
+            </div>
+
+            <a href="tel:+6622457010" class="button button-outline button-full">
+              <i data-lucide="landmark"></i>
+              <span>直拨中国驻泰使馆领保 (+66 2 245 7010)</span>
+            </a>
+          </div>
+        `;
+      }
+
+      modal.removeAttribute('hidden');
+      initIcons();
+
+      // 绑定复制按钮
+      const copyBtn = document.getElementById('modal-copy-btn');
+      if (copyBtn) {
+        copyBtn.addEventListener('click', () => {
+          copyToClipboard(payloadText, '求助完整报文已复制至剪贴板，可直接粘贴发微信或短信！');
+        });
+      }
+
+      const copyTrackBtn = document.getElementById('modal-copy-track-btn');
+      if (copyTrackBtn) {
+        copyTrackBtn.addEventListener('click', () => {
+          const liveUrl = getMyLiveTrackingUrl();
+          const shareMsg = `【护途实时定位追踪】我正在泰国行程中，请通过此链接实时查看我的最新移动轨迹与相对距离：\n${liveUrl}`;
+          copyToClipboard(shareMsg, '专属实时动态追踪链接已复制，可直接发给亲友或微信群！');
+        });
+      }
+    }
+
+    if (alertBtn) alertBtn.addEventListener('click', openSosModal);
+    if (dockSosBtn) dockSosBtn.addEventListener('click', openSosModal);
+
+    if (openPayloadBtn) {
+      openPayloadBtn.addEventListener('click', () => {
+        copyToClipboard(generateSosPayloadText());
+      });
+    }
+
+    if (closeBtn && modal) {
+      closeBtn.addEventListener('click', () => {
+        modal.setAttribute('hidden', '');
+      });
+
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+          modal.setAttribute('hidden', '');
+        }
+      });
+    }
+  }
+
+  // ==========================================
+  // 10. 安全设置与数据清空
+  // ==========================================
+  function initSettingsView() {
+    const clearBtn = document.getElementById('clear-data');
+    const locToggle = document.getElementById('settings-location-toggle');
+
+    if (clearBtn) {
+      clearBtn.addEventListener('click', () => {
+        if (confirm('确认清除本机的全部档案、联系人和定位记录吗？此操作无法撤销。')) {
+          localStorage.removeItem(STORAGE_KEYS.PROFILE);
+          localStorage.removeItem(STORAGE_KEYS.CONTACTS);
+          localStorage.removeItem(STORAGE_KEYS.LAST_LOCATION);
+
+          state.profile = {
+            name: '',
+            age: '',
+            phone: '',
+            address: '',
+            passport: '',
+            medical: '',
+          };
+          state.contacts = [
+            {
+              id: '1',
+              name: '紧急联系人1',
+              relation: '直系亲属',
+              phone: '',
+              isPrimary: true,
+            },
+          ];
+          state.location = {
+            lat: null,
+            lng: null,
+            accuracy: null,
+            updated: null,
+            granted: false,
+          };
+
+          // 重置表单
+          const pForm = document.getElementById('profile-form');
+          if (pForm) pForm.reset();
+
+          renderContacts();
+          updateAllViews();
+          showToast('本地所有加密数据已彻底抹除');
+        }
+      });
+    }
+
+    if (locToggle) {
+      locToggle.addEventListener('click', () => {
+        const isChecked = locToggle.getAttribute('aria-checked') === 'true';
+        locToggle.setAttribute('aria-checked', (!isChecked).toString());
+        if (!isChecked) {
+          requestGeolocation(true);
+        } else {
+          state.location.granted = false;
+          updateLocationUI();
+          showToast('已关闭实时定位权限');
+        }
+      });
+    }
+  }
+
+  // ==========================================
+  // 用户鉴权系统 (纯数字简易登录/注册)
+  // ==========================================
+  function initAuthSystem() {
+    const userBtn = document.getElementById('top-user-btn');
+    const authModal = document.getElementById('auth-modal');
+    const closeAuthBtn = document.getElementById('close-auth-modal');
+    const authForm = document.getElementById('auth-form');
+    const authDemoBtn = document.getElementById('auth-demo-btn');
+
+    // 若无登录用户，生成临时数字访客
+    if (!state.user) {
+      const randomNum = String(Math.floor(100000 + Math.random() * 900000));
+      state.user = {
+        id: `user_${randomNum}`,
+        username: randomNum,
+        name: state.profile.name || `行者${randomNum.slice(-3)}`,
+        avatar: state.profile.avatar || '',
+        phone: state.profile.phone || randomNum,
+      };
+    }
+
+    updateAuthUI();
+
+    if (userBtn && authModal) {
+      userBtn.addEventListener('click', () => {
+        const usernameInput = document.getElementById('auth-username');
+        const nameInput = document.getElementById('auth-name');
+        if (usernameInput) usernameInput.value = state.user?.username || '';
+        if (nameInput) nameInput.value = state.profile.name || state.user?.name || '';
+        authModal.removeAttribute('hidden');
+      });
+    }
+
+    if (closeAuthBtn && authModal) {
+      closeAuthBtn.addEventListener('click', () => {
+        authModal.setAttribute('hidden', '');
+      });
+      authModal.addEventListener('click', (e) => {
+        if (e.target === authModal) authModal.setAttribute('hidden', '');
+      });
+    }
+
+    if (authDemoBtn) {
+      authDemoBtn.addEventListener('click', () => {
+        const u = document.getElementById('auth-username');
+        const p = document.getElementById('auth-password');
+        const n = document.getElementById('auth-name');
+        if (u) u.value = '888888';
+        if (p) p.value = '123';
+        if (n) n.value = '阿泰 (曼谷向导)';
+        submitAuthLogin('888888', '123', '阿泰 (曼谷向导)');
+      });
+    }
+
+    if (authForm) {
+      authForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const username = document.getElementById('auth-username')?.value.trim();
+        const password = document.getElementById('auth-password')?.value.trim();
+        const name = document.getElementById('auth-name')?.value.trim();
+        submitAuthLogin(username, password, name);
+      });
+    }
+  }
+
+  function submitAuthLogin(username, password, name) {
+    const authModal = document.getElementById('auth-modal');
+    fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password, name }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success) {
+          state.user = data.user;
+          state.token = data.token;
+          try {
+            localStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, data.token);
+            localStorage.setItem(STORAGE_KEYS.AUTH_USER, JSON.stringify(data.user));
+          } catch (e) {}
+
+          if (name && !state.profile.name) {
+            state.profile.name = name;
+            saveProfileData();
+          }
+
+          if (authModal) authModal.setAttribute('hidden', '');
+          updateAuthUI();
+          updateAllViews();
+          reportMyLocation();
+          showToast(`登录成功！当前数字账号：#${data.user.username}`);
+        } else {
+          showToast(data.message || '登录失败，请检查账号密码', 'error');
+        }
+      })
+      .catch((err) => {
+        showToast('请求登录接口异常: ' + err.message, 'error');
+      });
+  }
+
+  function updateAuthUI() {
+    const topAvatar = document.getElementById('top-user-avatar');
+    const topName = document.getElementById('top-user-name');
+    if (!state.user) return;
+
+    if (topName) {
+      topName.textContent = state.user.name || `#${state.user.username}`;
+    }
+    if (topAvatar) {
+      if (state.profile.avatar || state.user.avatar) {
+        topAvatar.innerHTML = `<img src="${state.profile.avatar || state.user.avatar}" alt="Avatar">`;
+      } else {
+        topAvatar.textContent = (state.user.name || state.user.username || '用').charAt(0);
+      }
+    }
+    updateMyRadarMarker();
+  }
+
+  // ==========================================
+  // 6. 独立雷达全屏地图与头像标点驱动
+  // ==========================================
+  function getMyAvatarHtml() {
+    const avatarUrl = state.profile.avatar || (state.user && state.user.avatar) || '';
+    const myName = state.profile.name || (state.user && state.user.name) || (state.user && state.user.username) || '我';
+    const initial = myName.charAt(0);
+    return avatarUrl
+      ? `<img src="${avatarUrl}" alt="${escapeHtml(myName)}">`
+      : escapeHtml(initial);
+  }
+
+  function createMyRadarIcon() {
+    const avatarHtml = getMyAvatarHtml();
+    const myName = state.profile.name || (state.user && state.user.name) || '我';
+    const html = `
+      <div class="radar-avatar-marker is-me">
+        <div class="radar-avatar-pulse"></div>
+        <div class="radar-avatar-bubble">
+          <span>${escapeHtml(myName)}</span>
+          <span class="avatar-role-tag">(我)</span>
+        </div>
+        <div class="radar-avatar-ring">
+          ${avatarHtml}
+        </div>
+        <div class="radar-avatar-pointer"></div>
+      </div>
+    `;
+    return L.divIcon({
+      className: 'radar-avatar-leaflet-marker',
+      html: html,
+      iconSize: [42, 48],
+      iconAnchor: [21, 48],
+      popupAnchor: [0, -48],
+    });
+  }
+
+  function updateMyRadarMarker() {
+    if (!state.radarMap || !window.L) return;
+    const myLat = state.location.lat || DEFAULT_BANGKOK.lat;
+    const myLng = state.location.lng || DEFAULT_BANGKOK.lng;
+
+    const icon = createMyRadarIcon();
+    const myName = state.profile.name || (state.user && state.user.name) || '我';
+
+    if (!state.radarMarker) {
+      state.radarMarker = L.marker([myLat, myLng], { icon, zIndexOffset: 1000 }).addTo(state.radarMap);
+      state.radarMarker.on('dragend', (e) => {
+        const pos = e.target.getLatLng();
+        applyManualCalibration(pos.lat, pos.lng);
+      });
+    } else {
+      state.radarMarker.setIcon(icon);
+      state.radarMarker.setLatLng([myLat, myLng]);
+    }
+
+    const locSource = state.location.source === 'amap'
+      ? '高德开放平台高精定位'
+      : (state.location.source === 'manual' ? '手动精细校准' : '系统 GPS 定位');
+
+    state.radarMarker.bindPopup(`
+      <div style="font-size: 0.85rem; padding: 4px;">
+        <strong style="display:block;margin-bottom:2px;color:var(--blue-400);">我的当前位置 (${escapeHtml(myName)})</strong>
+        <div style="color:#64748b;font-size:0.75rem;margin:2px 0;">坐标: ${myLat.toFixed(4)}, ${myLng.toFixed(4)}</div>
+        <div style="color:#10b981;font-size:0.75rem;">定位来源: ${locSource} (±${state.location.accuracy || 20}m)</div>
+        ${state.location.address ? `<div style="color:#94a3b8;font-size:0.72rem;margin-top:2px;">位置: ${escapeHtml(state.location.address)}</div>` : ''}
+      </div>
+    `);
+  }
+
+  function initRadarMap() {
+    const radarContainer = document.getElementById('radar-fullscreen-map');
+    if (!radarContainer || !window.L) return;
+
+    const initialLat = state.location.lat || DEFAULT_BANGKOK.lat;
+    const initialLng = state.location.lng || DEFAULT_BANGKOK.lng;
+
+    state.radarMap = L.map('radar-fullscreen-map', {
+      zoomControl: true,
+      attributionControl: false,
+    }).setView([initialLat, initialLng], 13);
+
+    state.radarTileLayer = L.tileLayer(
+      state.theme === 'light' ? MAP_TILES.LIGHT : MAP_TILES.DARK,
+      {
+        subdomains: 'abcd',
+        maxZoom: 19,
+      }
+    ).addTo(state.radarMap);
+
+    updateMyRadarMarker();
+
+    // 绑定雷达工具栏操作
+    const locateMeBtn = document.getElementById('radar-locate-me-btn');
+    if (locateMeBtn) {
+      locateMeBtn.addEventListener('click', () => {
+        const myLat = state.location.lat || DEFAULT_BANGKOK.lat;
+        const myLng = state.location.lng || DEFAULT_BANGKOK.lng;
+        state.radarMap?.flyTo([myLat, myLng], 15);
+        showToast('已聚焦至我的当前位置');
+      });
+    }
+
+    // 绑定定位微调校准功能
+    const calibrateBtn = document.getElementById('radar-calibrate-btn');
+    const calibrateBtnText = document.getElementById('radar-calibrate-btn-text');
+
+    if (calibrateBtn) {
+      calibrateBtn.addEventListener('click', () => {
+        isCalibrating = !isCalibrating;
+        if (isCalibrating) {
+          calibrateBtn.classList.remove('button-outline');
+          calibrateBtn.classList.add('button-primary');
+          if (calibrateBtnText) calibrateBtnText.textContent = '完成校准';
+
+          if (state.radarMarker && state.radarMarker.dragging) {
+            state.radarMarker.dragging.enable();
+          }
+
+          showToast('已进入微调校准模式：可拖拽头像图钉，或直接在地图上点击任意位置进行校准！');
+        } else {
+          calibrateBtn.classList.add('button-outline');
+          calibrateBtn.classList.remove('button-primary');
+          if (calibrateBtnText) calibrateBtnText.textContent = '微调校准';
+
+          if (state.radarMarker && state.radarMarker.dragging) {
+            state.radarMarker.dragging.disable();
+          }
+
+          showToast('微调校准已锁定完成！');
+        }
+      });
+    }
+
+    state.radarMap.on('click', (e) => {
+      if (isCalibrating) {
+        applyManualCalibration(e.latlng.lat, e.latlng.lng);
+      }
+    });
+
+    const fitBoundsBtn = document.getElementById('radar-fit-bounds-btn');
+    if (fitBoundsBtn) {
+      fitBoundsBtn.addEventListener('click', () => {
+        fitAllMembers(state.radarMap);
+      });
+    }
+
+    const refreshGpsBtn = document.getElementById('radar-refresh-gps-btn');
+    if (refreshGpsBtn) {
+      refreshGpsBtn.addEventListener('click', () => {
+        requestGeolocation(true);
+      });
+    }
+
+    // 绑定顶部创建/切换房间按钮
+    const openRoomModalBtn = document.getElementById('radar-open-room-modal-btn');
+    if (openRoomModalBtn) {
+      openRoomModalBtn.addEventListener('click', () => {
+        const teamModal = document.getElementById('team-modal');
+        const input = document.getElementById('team-code-input');
+        if (input) input.value = state.teamCode;
+        if (teamModal) teamModal.removeAttribute('hidden');
+      });
+    }
+
+    // 绑定在线成员药丸胶囊按钮与浮层展开/收起
+    const rosterPillBtn = document.getElementById('radar-roster-pill-btn');
+    const rosterPopover = document.getElementById('radar-roster-popover');
+    const closePopoverBtn = document.getElementById('radar-close-popover-btn');
+    const collapsePopoverBtn = document.getElementById('radar-collapse-popover-btn');
+
+    if (rosterPillBtn && rosterPopover) {
+      function setRosterOpen(open) {
+        if (open) {
+          rosterPopover.removeAttribute('hidden');
+          rosterPillBtn.classList.add('active');
+          rosterPillBtn.setAttribute('aria-expanded', 'true');
+        } else {
+          rosterPopover.setAttribute('hidden', '');
+          rosterPillBtn.classList.remove('active');
+          rosterPillBtn.setAttribute('aria-expanded', 'false');
+        }
+      }
+
+      rosterPillBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isCurrentlyHidden = rosterPopover.hasAttribute('hidden');
+        setRosterOpen(isCurrentlyHidden);
+      });
+
+      if (closePopoverBtn) {
+        closePopoverBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setRosterOpen(false);
+        });
+      }
+
+      if (collapsePopoverBtn) {
+        collapsePopoverBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setRosterOpen(false);
+        });
+      }
+
+      // 点击浮层以外任意区域自动收起
+      document.addEventListener('click', (e) => {
+        if (!rosterPopover.hasAttribute('hidden')) {
+          const wrapper = document.querySelector('.radar-roster-dropdown-wrapper');
+          if (wrapper && !wrapper.contains(e.target)) {
+            setRosterOpen(false);
+          }
+        }
+      });
+
+      // 按下 ESC 键安全收起
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !rosterPopover.hasAttribute('hidden')) {
+          setRosterOpen(false);
+        }
+      });
+    }
+
+    // 绑定复制实时追踪分享链接按钮
+    const copyInviteBtn = document.getElementById('radar-copy-invite-btn');
+    if (copyInviteBtn) {
+      copyInviteBtn.addEventListener('click', () => {
+        const liveTrackingUrl = getMyLiveTrackingUrl();
+        const shareText = `【护途实时动态定位追踪】我正在泰国行程中共享实时位置！点击专属追踪链接，可随时在卫星地图上查看我的最新移动动态并计算相对距离：\n${liveTrackingUrl}`;
+        copyToClipboard(shareText, '专属实时动态追踪链接已复制，可直接发给亲友或微信群！');
+      });
+    }
+
+    // 自动监听容器尺寸变化（支持页面加载、面板切换、窗口调整自适应渲染瓦片）
+    if (window.ResizeObserver) {
+      const resizeObserver = new ResizeObserver(() => {
+        if (state.radarMap && radarContainer.offsetWidth > 0 && radarContainer.offsetHeight > 0) {
+          state.radarMap.invalidateSize();
+        }
+      });
+      resizeObserver.observe(radarContainer);
+    }
+  }
+
+  // ==========================================
+  // 多人小队位置同步与实时雷达系统
+  // ==========================================
+  function initTeamSystem() {
+    const switchBtn = document.getElementById('switch-team-btn');
+    const teamModal = document.getElementById('team-modal');
+    const closeTeamBtn = document.getElementById('close-team-modal');
+    const teamForm = document.getElementById('team-form');
+
+    updateRoomBadgesUI();
+
+    if (switchBtn && teamModal) {
+      switchBtn.addEventListener('click', () => {
+        const input = document.getElementById('team-code-input');
+        if (input) input.value = state.teamCode;
+        teamModal.removeAttribute('hidden');
+      });
+    }
+
+    if (closeTeamBtn && teamModal) {
+      closeTeamBtn.addEventListener('click', () => {
+        teamModal.setAttribute('hidden', '');
+      });
+      teamModal.addEventListener('click', (e) => {
+        if (e.target === teamModal) teamModal.setAttribute('hidden', '');
+      });
+    }
+
+    if (teamForm) {
+      teamForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const input = document.getElementById('team-code-input');
+        const code = input ? input.value.trim() : '';
+        if (switchTeamRoom(code)) {
+          if (teamModal) teamModal.setAttribute('hidden', '');
+        }
+      });
+    }
+
+    // 初始立即上报一次位置并拉取小队全员
+    setTimeout(() => {
+      reportMyLocation();
+      fetchTeamMembers();
+    }, 800);
+
+    // 每 4 秒自动心跳同步小队雷达
+    setInterval(() => {
+      reportMyLocation();
+      fetchTeamMembers();
+    }, 4000);
+  }
+
+  function updateRoomBadgesUI() {
+    const overviewBadge = document.getElementById('team-room-code-badge');
+    const radarBadge = document.getElementById('radar-room-badge');
+    const modalInput = document.getElementById('team-code-input');
+
+    if (overviewBadge) overviewBadge.textContent = `房间号 #${state.teamCode}`;
+    if (radarBadge) radarBadge.innerHTML = `<i data-lucide="hash"></i> 房间号 #${state.teamCode}`;
+    if (modalInput) modalInput.value = state.teamCode;
+
+    initIcons();
+  }
+
+  function switchTeamRoom(code) {
+    if (!code || code.length < 2) {
+      showToast('房间号至少需2位字符（支持数字、字母如 666888 或 TH888）', 'error');
+      return false;
+    }
+
+    state.teamCode = code;
+    try {
+      localStorage.setItem(STORAGE_KEYS.TEAM_CODE, code);
+    } catch (e) {}
+
+    updateRoomBadgesUI();
+
+    // 清空两处地图上的旧队友图钉
+    state.overviewTeamMarkers.forEach((m) => state.map?.removeLayer(m));
+    state.overviewTeamMarkers.clear();
+
+    state.radarTeamMarkers.forEach((m) => state.radarMap?.removeLayer(m));
+    state.radarTeamMarkers.clear();
+
+    reportMyLocation();
+    fetchTeamMembers();
+    showToast(`已切换至房间 #${code}，雷达全员同步中！`);
+    return true;
+  }
+
+  function fitAllMembers(mapInstance) {
+    if (!mapInstance || !window.L) return;
+    const points = [];
+    const myLat = state.location.lat || DEFAULT_BANGKOK.lat;
+    const myLng = state.location.lng || DEFAULT_BANGKOK.lng;
+    points.push([myLat, myLng]);
+
+    state.teamMembers.forEach((m) => {
+      const isMe = state.user && (m.userId === state.user.id || m.username === state.user.username);
+      if (!isMe && m.lat && m.lng) {
+        points.push([m.lat, m.lng]);
+      }
+    });
+
+    if (points.length > 1) {
+      mapInstance.fitBounds(L.latLngBounds(points), { padding: [50, 50], maxZoom: 16 });
+      showToast('已自适应缩放至全队视野');
+    } else {
+      mapInstance.setView(points[0], 14);
+      showToast('当前仅您一人在线，已居中当前位置');
+    }
+  }
+
+  function reportMyLocation() {
+    if (!state.user) return;
+    const lat = state.location.lat || DEFAULT_BANGKOK.lat;
+    const lng = state.location.lng || DEFAULT_BANGKOK.lng;
+
+    fetch('/api/team/location', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        teamCode: state.teamCode,
+        userId: state.user.id,
+        username: state.user.username,
+        name: state.profile.name || state.user.name || `行者#${state.user.username.slice(-4)}`,
+        avatar: state.profile.avatar || state.user.avatar || '',
+        phone: state.profile.phone || state.user.phone || '',
+        lat,
+        lng,
+        accuracy: state.location.accuracy || 20,
+        status: 'normal',
+      }),
+    }).catch(() => {});
+  }
+
+  function fetchTeamMembers() {
+    fetch(`/api/team/members?teamCode=${encodeURIComponent(state.teamCode)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (!data || !Array.isArray(data.members)) return;
+        state.teamMembers = data.members;
+        renderTeamMembersUI();
+        updateTeamMapMarkers();
+      })
+      .catch(() => {});
+  }
+
+  function renderTeamMembersUI() {
+    const myLat = state.location.lat || DEFAULT_BANGKOK.lat;
+    const myLng = state.location.lng || DEFAULT_BANGKOK.lng;
+
+    // 1. 更新中控台简易列表
+    const overviewListEl = document.getElementById('team-members-list');
+    const overviewCountEl = document.getElementById('team-online-count');
+    if (overviewCountEl) {
+      overviewCountEl.innerHTML = `<i data-lucide="users"></i> ${state.teamMembers.length} 人实时在线`;
+    }
+    if (overviewListEl) {
+      overviewListEl.innerHTML = '';
+      state.teamMembers.forEach((member) => {
+        const isMe = state.user && (member.userId === state.user.id || member.username === state.user.username);
+        const distM = calculateDistance(myLat, myLng, member.lat, member.lng);
+        const distStr = isMe ? '我的位置' : `距你 ${formatDistance(distM)}`;
+
+        const item = document.createElement('div');
+        item.className = 'team-member-item';
+        item.innerHTML = `
+          <div class="team-member-info">
+            <div class="member-avatar-mini">
+              ${
+                member.avatar
+                  ? `<img src="${member.avatar}" alt="Avatar">`
+                  : (member.name ? member.name.charAt(0) : '友')
+              }
+            </div>
+            <div class="member-text">
+              <strong>${escapeHtml(member.name)} ${isMe ? '<span style="color:var(--blue-400);font-size:0.7rem;">(我)</span>' : ''}</strong>
+              <span>坐标: ${member.lat.toFixed(4)}, ${member.lng.toFixed(4)} · 误差约 ±${member.accuracy}米</span>
+            </div>
+          </div>
+          <div class="distance-pill ${isMe ? 'is-me' : ''}">
+            ${distStr}
+          </div>
+        `;
+        overviewListEl.appendChild(item);
+      });
+    }
+
+    // 2. 更新独立雷达中心全景花名册与在线药丸
+    const radarRosterListEl = document.getElementById('radar-roster-list');
+    const radarRosterCountEl = document.getElementById('radar-roster-count');
+    const radarRosterPillText = document.getElementById('radar-roster-pill-text');
+
+    if (radarRosterCountEl) {
+      radarRosterCountEl.innerHTML = `<i data-lucide="users"></i> ${state.teamMembers.length}人在线`;
+    }
+    if (radarRosterPillText) {
+      radarRosterPillText.textContent = `${state.teamMembers.length}人在线`;
+    }
+
+    if (radarRosterListEl) {
+      radarRosterListEl.innerHTML = '';
+      state.teamMembers.forEach((member) => {
+        const isMe = state.user && (member.userId === state.user.id || member.username === state.user.username);
+        const distM = calculateDistance(myLat, myLng, member.lat, member.lng);
+        const distStr = isMe ? '当前位置' : formatDistance(distM);
+        const isGuide = member.username === '888888';
+
+        const item = document.createElement('div');
+        item.className = 'radar-roster-item';
+        item.title = '点击可在地图上聚焦该成员';
+        item.innerHTML = `
+          <div class="radar-roster-left">
+            <div class="radar-roster-avatar ${isGuide ? 'is-guide' : ''}">
+              ${
+                member.avatar
+                  ? `<img src="${member.avatar}" alt="${escapeHtml(member.name)}">`
+                  : (member.name ? member.name.charAt(0) : '友')
+              }
+            </div>
+            <div class="radar-roster-info">
+              <strong>${escapeHtml(member.name)} ${isMe ? '<span style="color:var(--blue-400);font-size:0.75rem;">(我)</span>' : ''} ${isGuide ? '<span style="color:var(--amber-400);font-size:0.72rem;">(官方向导)</span>' : ''}</strong>
+              <span>${member.phone || '未公开电话'} · 经纬: ${member.lat.toFixed(3)}, ${member.lng.toFixed(3)}</span>
+            </div>
+          </div>
+          <div class="radar-roster-dist">
+            ${distStr}
+          </div>
+        `;
+
+        item.addEventListener('click', () => {
+          if (state.radarMap) {
+            state.radarMap.flyTo([member.lat, member.lng], 16, { duration: 1.2 });
+            const marker = state.radarTeamMarkers.get(member.userId);
+            if (marker) {
+              setTimeout(() => marker.openPopup(), 1200);
+            }
+            showToast(`已在全景地图中定位聚焦：${member.name}`);
+          }
+        });
+
+        radarRosterListEl.appendChild(item);
+      });
+    }
+
+    initIcons();
+  }
+
+  function createTeamPinIcon(member, isGuide, myLat, myLng) {
+    const distM = calculateDistance(myLat, myLng, member.lat, member.lng);
+    const distStr = formatDistance(distM);
+
+    const avatarHtml = member.avatar
+      ? `<img src="${member.avatar}" alt="${escapeHtml(member.name)}">`
+      : escapeHtml(member.name ? member.name.charAt(0) : '友');
+
+    const pinHtml = `
+      <div class="radar-avatar-marker ${isGuide ? 'is-guide' : ''}">
+        <div class="radar-avatar-pulse"></div>
+        <div class="radar-avatar-bubble">
+          <span>${escapeHtml(member.name)}</span>
+          ${isGuide ? '<span style="color:#fbbf24;font-size:0.68rem;margin-left:2px;">(向导)</span>' : ''}
+          <span class="pin-dist">(${distStr})</span>
+        </div>
+        <div class="radar-avatar-ring">
+          ${avatarHtml}
+        </div>
+        <div class="radar-avatar-pointer"></div>
+      </div>
+    `;
+
+    return L.divIcon({
+      className: 'radar-avatar-leaflet-marker',
+      html: pinHtml,
+      iconSize: [42, 48],
+      iconAnchor: [21, 48],
+      popupAnchor: [0, -48],
+    });
+  }
+
+  function updateMapMarkersForInstance(mapInstance, markerMap) {
+    if (!mapInstance || !window.L) return;
+
+    const myLat = state.location.lat || DEFAULT_BANGKOK.lat;
+    const myLng = state.location.lng || DEFAULT_BANGKOK.lng;
+    const activeUserIds = new Set();
+
+    state.teamMembers.forEach((member) => {
+      const isMe = state.user && (member.userId === state.user.id || member.username === state.user.username);
+      if (isMe) return;
+
+      activeUserIds.add(member.userId);
+      const distM = calculateDistance(myLat, myLng, member.lat, member.lng);
+      const distStr = formatDistance(distM);
+      const isGuide = member.username === '888888';
+
+      const teamPinIcon = createTeamPinIcon(member, isGuide, myLat, myLng);
+
+      if (markerMap.has(member.userId)) {
+        const existingMarker = markerMap.get(member.userId);
+        existingMarker.setLatLng([member.lat, member.lng]);
+        existingMarker.setIcon(teamPinIcon);
+      } else {
+        const newMarker = L.marker([member.lat, member.lng], { icon: teamPinIcon }).addTo(mapInstance);
+        newMarker.bindPopup(`
+          <div style="font-size: 0.85rem; padding: 4px;">
+            <strong style="display:block;margin-bottom:2px;">${escapeHtml(member.name)}</strong>
+            <div style="color:#64748b;font-size:0.75rem;margin:2px 0;">电话: ${escapeHtml(member.phone || '未公开')}</div>
+            <div style="color:#10b981;font-weight:600;">相对距离: ${distStr}</div>
+            ${member.phone ? `<a href="tel:${escapeHtml(member.phone)}" style="display:inline-block;margin-top:6px;padding:4px 10px;background:#10b981;color:#fff;border-radius:4px;text-decoration:none;font-size:0.75rem;font-weight:600;">一键呼叫</a>` : ''}
+          </div>
+        `);
+        markerMap.set(member.userId, newMarker);
+      }
+    });
+
+    for (const [uid, marker] of markerMap.entries()) {
+      if (!activeUserIds.has(uid)) {
+        mapInstance.removeLayer(marker);
+        markerMap.delete(uid);
+      }
+    }
+  }
+
+  function updateTeamMapMarkers() {
+    updateMapMarkersForInstance(state.map, state.overviewTeamMarkers);
+    updateMapMarkersForInstance(state.radarMap, state.radarTeamMarkers);
+    updateMyRadarMarker();
+  }
+
+  function calculateDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371e3; // 半径 (米)
+    const rad = Math.PI / 180;
+    const phi1 = lat1 * rad;
+    const phi2 = lat2 * rad;
+    const deltaPhi = (lat2 - lat1) * rad;
+    const deltaLambda = (lon2 - lon1) * rad;
+
+    const a =
+      Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) +
+      Math.cos(phi1) * Math.cos(phi2) * Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  }
+
+  function formatDistance(meters) {
+    if (isNaN(meters)) return '--';
+    if (meters < 1000) {
+      return `${Math.round(meters)}米`;
+    }
+    return `${(meters / 1000).toFixed(1)}公里`;
+  }
+
+  // ==========================================
+  // 图片上传服务 (头像与现场险情照片上传)
+  // ==========================================
+  function initImageUpload() {
+    const avatarInput = document.getElementById('avatar-file-input');
+    const avatarTrigger = document.getElementById('avatar-upload-trigger');
+    const triggerAvatarBtn = document.getElementById('trigger-avatar-btn');
+
+    function openFilePicker() {
+      if (avatarInput) avatarInput.click();
+    }
+
+    if (avatarTrigger) avatarTrigger.addEventListener('click', openFilePicker);
+    if (triggerAvatarBtn) triggerAvatarBtn.addEventListener('click', openFilePicker);
+
+    if (avatarInput) {
+      avatarInput.addEventListener('change', (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        if (!file.type.startsWith('image/')) {
+          showToast('请选择有效的图片文件 (JPG / PNG / WebP)', 'error');
+          return;
+        }
+
+        if (file.size > 10 * 1024 * 1024) {
+          showToast('图片大小不能超过 10MB', 'error');
+          return;
+        }
+
+        showToast('正在上传图片到 Cloudflare Worker...');
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        fetch('/api/upload', {
+          method: 'POST',
+          body: formData,
+        })
+          .then((res) => res.json())
+          .then((data) => {
+            if (data.success && data.url) {
+              state.profile.avatar = data.url;
+              if (state.user) {
+                state.user.avatar = data.url;
+                try {
+                  localStorage.setItem(STORAGE_KEYS.AUTH_USER, JSON.stringify(state.user));
+                } catch (err) {}
+              }
+
+              saveProfileData();
+              updateAuthUI();
+              updateProfileUI();
+              reportMyLocation();
+              showToast('真实头像上传成功，已同步至小队雷达！');
+            } else {
+              showToast(data.message || '图片上传失败', 'error');
+            }
+          })
+          .catch((err) => {
+            showToast('上传接口错误: ' + err.message, 'error');
+          });
+      });
+    }
+  }
+
+  // ==========================================
+  // 11. 边缘端存活检测 API
+  // ==========================================
+  function fetchBackendHealth() {
+    fetch('/api/health')
+      .then((res) => res.json())
+      .then((data) => {
+        console.log('[Cloudflare Edge Worker]', data);
+      })
+      .catch((err) => {
+        console.log('Worker API 待本地启动或由静态资源托管:', err.message);
+      });
+  }
+
+  // ==========================================
+  // 12. 专属实时动态追踪查看器 (Live Tracking Mode)
+  // ==========================================
+  let activeTrackingInterval = null;
+  let trackingTargetMarker = null;
+
+  function initLiveTrackingViewer() {
+    const params = new URLSearchParams(window.location.search);
+    const trackTarget = params.get('track') || params.get('user');
+    const roomParam = params.get('room');
+
+    if (roomParam && roomParam !== state.teamCode) {
+      state.teamCode = roomParam;
+      try {
+        localStorage.setItem(STORAGE_KEYS.TEAM_CODE, roomParam);
+      } catch (e) {}
+      updateRoomBadgesUI();
+    }
+
+    if (!trackTarget) return;
+
+    // 自动切换到雷达视图并开启实时动态追踪
+    setTimeout(() => {
+      const radarNavBtn = document.querySelector('[data-view="radar"]');
+      if (radarNavBtn) radarNavBtn.click();
+      startTrackingUser(trackTarget);
+    }, 350);
+  }
+
+  function startTrackingUser(username) {
+    if (activeTrackingInterval) {
+      clearInterval(activeTrackingInterval);
+      activeTrackingInterval = null;
+    }
+
+    const banner = document.getElementById('radar-live-tracking-banner');
+    const titleEl = document.getElementById('tracking-banner-title');
+    const subEl = document.getElementById('tracking-banner-sub');
+    const callBtn = document.getElementById('tracking-call-btn');
+    const navBtn = document.getElementById('tracking-nav-btn');
+    const focusBtn = document.getElementById('tracking-focus-btn');
+    const exitBtn = document.getElementById('tracking-exit-btn');
+
+    if (banner) banner.removeAttribute('hidden');
+
+    let currentTargetData = null;
+
+    function pollUserLocation(isFirst = false) {
+      fetch(`/api/track/${encodeURIComponent(username)}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (!data || !data.success || !data.user) {
+            if (isFirst) {
+              showToast(`未能查到用户【${username}】的实时坐标，该用户可能尚未开启定位`, 'error');
+              if (subEl) subEl.textContent = '未查到实时心跳，可能已离线或尚未授权 GPS';
+            }
+            return;
+          }
+
+          const target = data.user;
+          currentTargetData = target;
+
+          const myLat = state.location.lat || DEFAULT_BANGKOK.lat;
+          const myLng = state.location.lng || DEFAULT_BANGKOK.lng;
+          const distM = calculateDistance(myLat, myLng, target.lat, target.lng);
+          const distStr = formatDistance(distM);
+
+          if (titleEl) {
+            titleEl.innerHTML = `正在实时动态追踪：<strong>${escapeHtml(target.name)}</strong> (${escapeHtml(target.username)})`;
+          }
+          if (subEl) {
+            subEl.textContent = `最新心跳: ${target.timeAgo} · 相对距离: 距你约 ${distStr} · 坐标: ${target.lat.toFixed(4)}, ${target.lng.toFixed(4)}`;
+          }
+
+          if (callBtn) {
+            if (target.phone) {
+              callBtn.style.display = 'inline-flex';
+              callBtn.href = `tel:${target.phone}`;
+            } else {
+              callBtn.style.display = 'none';
+            }
+          }
+
+          if (navBtn) {
+            navBtn.href = `https://www.google.com/maps/dir/?api=1&destination=${target.lat},${target.lng}`;
+          }
+
+          // 在地图上突出渲染目标头像标点
+          if (state.radarMap) {
+            const isGuide = target.username === '888888';
+            const pinIcon = createTeamPinIcon(target, isGuide, myLat, myLng);
+            if (!trackingTargetMarker) {
+              trackingTargetMarker = L.marker([target.lat, target.lng], { icon: pinIcon, zIndexOffset: 2000 }).addTo(state.radarMap);
+            } else {
+              trackingTargetMarker.setIcon(pinIcon);
+              trackingTargetMarker.setLatLng([target.lat, target.lng]);
+            }
+
+            if (isFirst) {
+              state.radarMap.flyTo([target.lat, target.lng], 16, { duration: 1.5 });
+              showToast(`已成功锁定【${target.name}】的实时动态位置！`);
+            }
+          }
+        })
+        .catch(() => {});
+    }
+
+    pollUserLocation(true);
+    activeTrackingInterval = setInterval(() => pollUserLocation(false), 4000);
+
+    if (focusBtn) {
+      focusBtn.onclick = () => {
+        if (currentTargetData && state.radarMap) {
+          state.radarMap.flyTo([currentTargetData.lat, currentTargetData.lng], 16);
+          showToast(`已居中聚焦【${currentTargetData.name}】`);
+        }
+      };
+    }
+
+    if (exitBtn) {
+      exitBtn.onclick = () => {
+        if (activeTrackingInterval) {
+          clearInterval(activeTrackingInterval);
+          activeTrackingInterval = null;
+        }
+        if (banner) banner.setAttribute('hidden', '');
+        if (trackingTargetMarker && state.radarMap) {
+          state.radarMap.removeLayer(trackingTargetMarker);
+          trackingTargetMarker = null;
+        }
+        // 清除 url 参数
+        const cleanUrl = window.location.pathname;
+        window.history.replaceState({}, '', cleanUrl);
+        showToast('已退出实时动态追踪模式');
+      };
+    }
+  }
+
+  // ==========================================
+  // 13. 工具函数 (Toast, Clipboard, Helper)
+  // ==========================================
+  function updateAllViews() {
+    updateProfileUI();
+    updateLocationUI();
+    updateReadinessScore();
+  }
+
+  function copyToClipboard(text, customMsg) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard
+        .writeText(text)
+        .then(() => showToast(customMsg || '已成功复制至剪贴板！'))
+        .catch(() => fallbackCopy(text, customMsg));
+    } else {
+      fallbackCopy(text, customMsg);
+    }
+  }
+
+  function fallbackCopy(text, customMsg) {
+    const textArea = document.createElement('textarea');
+    textArea.value = text;
+    textArea.style.position = 'fixed';
+    textArea.style.opacity = '0';
+    document.body.appendChild(textArea);
+    textArea.select();
+    try {
+      document.execCommand('copy');
+      showToast(customMsg || '已成功复制！');
+    } catch (e) {
+      showToast('复制失败，请手动长按复制', 'error');
+    }
+    document.body.removeChild(textArea);
+  }
+
+  function showToast(msg, type = 'success') {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+
+    const toast = document.createElement('div');
+    toast.className = `toast ${type === 'error' ? 'toast-error' : ''}`;
+    toast.innerHTML = `
+      <i data-lucide="${type === 'error' ? 'alert-circle' : 'check-circle-2'}"></i>
+      <span>${escapeHtml(msg)}</span>
+    `;
+
+    container.appendChild(toast);
+    initIcons();
+
+    setTimeout(() => {
+      toast.style.transition = 'opacity 0.3s, transform 0.3s';
+      toast.style.opacity = '0';
+      toast.style.transform = 'translateY(10px)';
+      setTimeout(() => toast.remove(), 300);
+    }, 3200);
+  }
+
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+})();
