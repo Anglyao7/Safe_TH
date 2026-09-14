@@ -635,6 +635,7 @@ app.get('/api/system/users', async (c) => {
                   username: u.username,
                   name: u.name,
                   phone: u.phone,
+                  password: u.password,
                 });
               }
             } catch (e) {}
