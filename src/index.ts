@@ -141,15 +141,61 @@ function getKV(c: any): any {
 async function findUser(c: any, username: string): Promise<User | null> {
   const kv = getKV(c);
   const lower = username.toLowerCase().trim();
+  const digitsOnly = lower.replace(/\D/g, '');
+
   if (kv) {
     try {
+      // 1. 直接查询精确与小写键
       let data = await kv.get(`user:${lower}`);
       if (!data) data = await kv.get(`user:${username}`);
+      if (!data && digitsOnly.length >= 7) {
+        data = await kv.get(`user_phone:${digitsOnly}`);
+      }
       if (data) return JSON.parse(data);
+
+      // 2. 遍历现有用户进行模糊别名匹配 (如输入 anglyao 匹配 Anglyao778@gmail.com，或手机号匹配)
+      const list = await kv.list({ prefix: 'user:' });
+      if (list && list.keys) {
+        for (const k of list.keys) {
+          const raw = await kv.get(k.name);
+          if (raw) {
+            try {
+              const u: User = JSON.parse(raw);
+              const uLower = (u.username || '').toLowerCase();
+              const uPhoneDigits = (u.phone || '').replace(/\D/g, '');
+
+              // 账号或邮箱全名一致
+              if (uLower === lower) return u;
+              // 手机号末尾匹配
+              if (digitsOnly.length >= 7 && uPhoneDigits.endsWith(digitsOnly)) return u;
+              // 邮箱前缀匹配 (例如用户输入 anglyao 匹配 Anglyao778@gmail.com)
+              if (uLower.includes('@')) {
+                const prefix = uLower.split('@')[0];
+                if (prefix === lower || prefix.startsWith(lower) || lower.startsWith(prefix)) {
+                  return u;
+                }
+              }
+            } catch (e) {}
+          }
+        }
+      }
     } catch (e) {
       console.warn('KV read user error:', e);
     }
   }
+
+  // 内存备用匹配
+  for (const [, u] of users.entries()) {
+    const uLower = (u.username || '').toLowerCase();
+    const uPhoneDigits = (u.phone || '').replace(/\D/g, '');
+    if (uLower === lower) return u;
+    if (digitsOnly.length >= 7 && uPhoneDigits.endsWith(digitsOnly)) return u;
+    if (uLower.includes('@')) {
+      const prefix = uLower.split('@')[0];
+      if (prefix === lower || prefix.startsWith(lower) || lower.startsWith(prefix)) return u;
+    }
+  }
+
   return users.get(lower) || users.get(username) || null;
 }
 
@@ -163,6 +209,24 @@ async function persistUser(c: any, user: User): Promise<void> {
       await kv.put(`user:${lower}`, JSON.stringify(user));
       await kv.put(`user:${user.username}`, JSON.stringify(user));
       await kv.put(`user_id:${user.id}`, JSON.stringify(user));
+
+      // 手机号索引
+      if (user.phone) {
+        const phoneDigits = user.phone.replace(/\D/g, '');
+        if (phoneDigits) {
+          await kv.put(`user_phone:${phoneDigits}`, JSON.stringify(user));
+        }
+      }
+
+      // 邮箱前缀别名索引 (例如 Anglyao778@gmail.com -> user:anglyao778 和 user:anglyao)
+      if (lower.includes('@')) {
+        const prefix = lower.split('@')[0];
+        await kv.put(`user:${prefix}`, JSON.stringify(user));
+        const alphaOnly = prefix.replace(/\d+$/, '');
+        if (alphaOnly && alphaOnly !== prefix) {
+          await kv.put(`user:${alphaOnly}`, JSON.stringify(user));
+        }
+      }
     } catch (e) {
       console.warn('KV put user error:', e);
     }
