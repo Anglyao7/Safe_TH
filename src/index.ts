@@ -83,6 +83,18 @@ app.get('/api/health', (c) => {
   });
 });
 
+app.get('/api/geo', (c) => {
+  const cf = (c.req.raw as any).cf || {};
+  return c.json({
+    ip: c.req.header('cf-connecting-ip') || '',
+    country: cf.country || '',
+    city: cf.city || '',
+    region: cf.region || '',
+    lat: cf.latitude ? Number(cf.latitude) : null,
+    lng: cf.longitude ? Number(cf.longitude) : null,
+  });
+});
+
 app.get('/api/emergency-contacts', (c) => {
   return c.json([
     {

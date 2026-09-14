@@ -184,8 +184,9 @@
     updateAllViews();
     fetchBackendHealth();
 
-    // 默认尝试定位
+    // 优先尝试高德/浏览器高精度定位，同时并发进行网络IP对齐
     requestGeolocation(false);
+    fetchIpLocationFallback();
   });
 
   function initIcons() {
@@ -818,15 +819,17 @@
         const topDot = document.getElementById('top-location-dot');
 
         if (stateEl) {
-          stateEl.innerHTML = '<span class="status-dot status-dot-neutral"></span><span>采用默认曼谷坐标</span>';
+          stateEl.innerHTML = '<span class="status-dot status-dot-warn"></span><span>点击刷新定位</span>';
         }
-        if (topText) topText.textContent = '泰国曼谷 (默认)';
         if (topDot) {
           topDot.className = 'status-dot status-dot-warn';
         }
         if (manualTrigger) {
-          showToast('无法获取精确定位，已回退至曼谷基准点', 'error');
+          showToast('无法获取GPS精确定位，请在手机或浏览器权限中开启“位置信息”', 'warning');
         }
+
+        // 启动网络 IP 定位兜底，避免漂移到泰国曼谷
+        fetchIpLocationFallback();
 
         updateLocationUI();
         updateReadinessScore();
@@ -837,6 +840,31 @@
         maximumAge: 0,
       }
     );
+  }
+
+  function fetchIpLocationFallback() {
+    fetch('/api/geo')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data && data.lat && data.lng && (!state.location.granted || state.location.lat === null)) {
+          state.location.lat = Number(data.lat.toFixed(6));
+          state.location.lng = Number(data.lng.toFixed(6));
+          state.location.city = data.city || data.region || '';
+          state.location.accuracy = 3000;
+          state.location.source = 'ip';
+          state.location.granted = true;
+
+          const topText = document.getElementById('top-location-text');
+          if (topText) topText.textContent = data.city ? `${data.city} (IP定位)` : (data.region || '当前网络位置');
+
+          applyLocationToMaps(data.lat, data.lng);
+          updateLocationUI();
+          if (state.user) {
+            reportMyLocation();
+          }
+        }
+      })
+      .catch(() => {});
   }
 
   function requestGeolocation(manualTrigger = false) {
@@ -2489,14 +2517,18 @@ ${googleMapUrl}
   function fitAllMembers(mapInstance) {
     if (!mapInstance || !window.L) return;
     const points = [];
-    const myLat = state.location.lat || DEFAULT_BANGKOK.lat;
-    const myLng = state.location.lng || DEFAULT_BANGKOK.lng;
-    const myDisp = toMapCoordinate(myLat, myLng);
-    points.push([myDisp.lat, myDisp.lng]);
+    if (state.location.lat !== null && state.location.lng !== null && state.location.granted) {
+      const myDisp = toMapCoordinate(state.location.lat, state.location.lng);
+      points.push([myDisp.lat, myDisp.lng]);
+    }
 
     state.teamMembers.forEach((m) => {
       const isMe = state.user && (m.userId === state.user.id || m.username === state.user.username);
       if (!isMe && m.lat && m.lng) {
+        // 如果当前有境内坐标，过滤掉残留的默认曼谷占位坐标 (13.7563)
+        if (m.lat === 13.7563 && m.lng === 100.5018 && state.teamMembers.some((o) => o.lat > 20)) {
+          return;
+        }
         const mDisp = toMapCoordinate(m.lat, m.lng);
         points.push([mDisp.lat, mDisp.lng]);
       }
@@ -2505,16 +2537,20 @@ ${googleMapUrl}
     if (points.length > 1) {
       mapInstance.fitBounds(L.latLngBounds(points), { padding: [50, 50], maxZoom: 16 });
       showToast('已自适应缩放至全队视野');
-    } else {
+    } else if (points.length === 1) {
       mapInstance.setView(points[0], 14);
-      showToast('当前仅您一人在线，已居中当前位置');
+      showToast('已对齐当前成员视野');
     }
   }
 
   function reportMyLocation() {
     if (!state.user) return;
-    const lat = state.location.lat || DEFAULT_BANGKOK.lat;
-    const lng = state.location.lng || DEFAULT_BANGKOK.lng;
+    // 如果尚未获取到有效定位（仍处于未授权或 null），不要向小队上报虚假的曼谷坐标！
+    if (state.location.lat === null || state.location.lng === null || !state.location.granted) {
+      return;
+    }
+    const lat = state.location.lat;
+    const lng = state.location.lng;
 
     fetch('/api/team/location', {
       method: 'POST',
