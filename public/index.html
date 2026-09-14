@@ -1056,12 +1056,12 @@
       </div>
     </div>
 
-    <!-- 纯数字简易登录与注册弹窗 -->
+    <!-- 登录与注册弹窗 (支持清晰选项卡切换) -->
     <div id="auth-modal" class="modal-backdrop" hidden>
       <div class="modal glass-card-modal auth-modal-box" role="dialog" aria-modal="true" aria-labelledby="auth-modal-title">
         <div class="modal-header">
           <div class="modal-title-group">
-            <div class="eyebrow"><i data-lucide="fingerprint"></i> MINIMAL NUMERIC AUTH</div>
+            <div class="eyebrow"><i data-lucide="fingerprint"></i> SAFE TRAVEL AUTH</div>
             <h3 id="auth-modal-title">同行者账号登录 / 注册</h3>
           </div>
           <button id="close-auth-modal" class="icon-button" type="button" aria-label="关闭登录窗口">
@@ -1070,68 +1070,243 @@
         </div>
 
         <div class="modal-body">
-          <p class="auth-intro-note">
-            账号与密码支持纯数字、英文字母或任意字符组合（如手机号、昵称代码 <code>alex</code>、<code>888888</code> 等），无需复杂繁琐门槛，支持自动注册并极速登录。
-          </p>
+          <!-- 登录/注册选项卡 -->
+          <div class="auth-segmented-tabs" role="tablist">
+            <button id="auth-tab-login" class="auth-tab-btn active" type="button" role="tab" aria-selected="true">
+              <i data-lucide="log-in"></i>
+              <span>立即登录</span>
+            </button>
+            <button id="auth-tab-register" class="auth-tab-btn" type="button" role="tab" aria-selected="false">
+              <i data-lucide="user-plus"></i>
+              <span>注册新同行者</span>
+            </button>
+          </div>
 
-          <form id="auth-form" class="auth-form-layout">
+          <!-- 1. 登录表单 -->
+          <form id="auth-login-form" class="auth-form-layout">
             <label class="field">
-              <span class="field-label">账号 (支持纯数字、字母或组合) <em>*</em></span>
+              <span class="field-label">账号 (用户名 / 手机号 / 数字ID) <em>*</em></span>
               <div class="field-control">
                 <i data-lucide="user"></i>
                 <input
-                  id="auth-username"
+                  id="login-username"
                   name="username"
                   type="text"
-                  placeholder="例如：888888 或 alex 或 手机号码"
+                  placeholder="请输入账号或手机号 (如 888888 或 alex)"
                   required
                   minlength="2"
                   maxlength="30"
+                  autocomplete="username"
                 />
               </div>
             </label>
 
             <label class="field">
-              <span class="field-label">密码 (支持纯数字、字母或组合) <em>*</em></span>
+              <span class="field-label">登录密码 <em>*</em></span>
               <div class="field-control">
                 <i data-lucide="key-round"></i>
                 <input
-                  id="auth-password"
+                  id="login-password"
                   name="password"
                   type="password"
-                  placeholder="例如：123 或 pass123"
+                  class="has-suffix"
+                  placeholder="请输入登录密码"
                   required
                   minlength="3"
                   maxlength="30"
+                  autocomplete="current-password"
+                />
+                <button type="button" class="field-suffix-btn" id="toggle-login-pwd-btn" title="显示/隐藏密码">
+                  <i data-lucide="eye"></i>
+                </button>
+              </div>
+            </label>
+
+            <div class="auth-options-row">
+              <label class="remember-checkbox">
+                <input type="checkbox" id="login-remember" checked />
+                <span>保持免密登录</span>
+              </label>
+              <button type="button" class="text-link-btn" id="login-switch-to-register">没有账号？立即注册</button>
+            </div>
+
+            <div class="auth-btn-stack">
+              <button id="login-submit-btn" class="button button-primary button-full" type="submit">
+                <i data-lucide="log-in"></i>
+                <span>立即安全登录</span>
+              </button>
+              <button id="login-demo-btn" class="button button-secondary button-full" type="button">
+                <i data-lucide="sparkles"></i>
+                <span>一键体验向导账号 (888888 / 123)</span>
+              </button>
+            </div>
+          </form>
+
+          <!-- 2. 注册表单 -->
+          <form id="auth-register-form" class="auth-form-layout" hidden>
+            <label class="field">
+              <span class="field-label">注册账号 (用户名 / 手机号) <em>*</em></span>
+              <div class="field-control">
+                <i data-lucide="user"></i>
+                <input
+                  id="reg-username"
+                  name="username"
+                  type="text"
+                  placeholder="2-20位字符，支持手机号或英文"
+                  required
+                  minlength="2"
+                  maxlength="20"
+                  autocomplete="username"
                 />
               </div>
             </label>
 
             <label class="field">
-              <span class="field-label">旅行者称呼 (可选)</span>
+              <span class="field-label">同行称呼 / 昵称 <em>*</em></span>
               <div class="field-control">
                 <i data-lucide="smile"></i>
                 <input
-                  id="auth-name"
+                  id="reg-name"
                   name="name"
                   type="text"
-                  placeholder="例如：小林 / 旅行者阿强"
+                  placeholder="例如：小林 / 阿强 (曼谷自由行)"
+                  required
                   maxlength="20"
                 />
               </div>
             </label>
 
+            <label class="field">
+              <span class="field-label">设置登录密码 <em>*</em></span>
+              <div class="field-control">
+                <i data-lucide="key-round"></i>
+                <input
+                  id="reg-password"
+                  name="password"
+                  type="password"
+                  class="has-suffix"
+                  placeholder="至少 3 位字符"
+                  required
+                  minlength="3"
+                  maxlength="30"
+                  autocomplete="new-password"
+                />
+                <button type="button" class="field-suffix-btn" id="toggle-reg-pwd-btn" title="显示/隐藏密码">
+                  <i data-lucide="eye"></i>
+                </button>
+              </div>
+            </label>
+
+            <label class="field">
+              <span class="field-label">确认登录密码 <em>*</em></span>
+              <div class="field-control">
+                <i data-lucide="shield-check"></i>
+                <input
+                  id="reg-confirm-password"
+                  name="confirmPassword"
+                  type="password"
+                  class="has-suffix"
+                  placeholder="请再次输入密码确认"
+                  required
+                  minlength="3"
+                  maxlength="30"
+                  autocomplete="new-password"
+                />
+                <button type="button" class="field-suffix-btn" id="toggle-reg-confirm-pwd-btn" title="显示/隐藏密码">
+                  <i data-lucide="eye"></i>
+                </button>
+              </div>
+            </label>
+
+            <label class="field">
+              <span class="field-label">紧急联络手机号 (可选)</span>
+              <div class="field-control">
+                <i data-lucide="phone"></i>
+                <input
+                  id="reg-phone"
+                  name="phone"
+                  type="tel"
+                  placeholder="例如：+86 13800138000 或 泰国本地卡"
+                  maxlength="25"
+                />
+              </div>
+            </label>
+
             <div class="auth-btn-stack">
-              <button id="auth-submit-btn" class="button button-primary button-full" type="submit">
-                <i data-lucide="log-in"></i>
-                <span>立即登录 / 自动注册加入</span>
-              </button>
-              <button id="auth-demo-btn" class="button button-secondary button-full" type="button">
-                <i data-lucide="sparkles"></i>
-                <span>一键填入演示向导账号 (888888 / 123)</span>
+              <button id="reg-submit-btn" class="button button-primary button-full" type="submit">
+                <i data-lucide="user-plus"></i>
+                <span>完成注册并加入同行小队</span>
               </button>
             </div>
+
+            <div class="auth-footer-prompt">
+              <span>已有同行账号？</span>
+              <button type="button" class="text-link-btn" id="register-switch-to-login">直接返回登录</button>
+            </div>
           </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- 已登录用户个人中心卡片弹窗 -->
+    <div id="user-center-modal" class="modal-backdrop" hidden>
+      <div class="modal glass-card-modal auth-modal-box" role="dialog" aria-modal="true" aria-labelledby="user-center-title">
+        <div class="modal-header">
+          <div class="modal-title-group">
+            <div class="eyebrow"><i data-lucide="user-check"></i> PROFILE CENTER</div>
+            <h3 id="user-center-title">同行旅行者个人档案</h3>
+          </div>
+          <button id="close-user-center-modal" class="icon-button" type="button" aria-label="关闭个人中心">
+            <i data-lucide="x"></i>
+          </button>
+        </div>
+
+        <div class="modal-body">
+          <div class="user-center-card">
+            <div class="user-center-avatar-wrap">
+              <div class="user-center-avatar" id="uc-avatar">用</div>
+              <div class="user-center-online-dot" title="实时心跳在线"></div>
+            </div>
+            <div class="user-center-name" id="uc-name">--</div>
+            <div class="user-center-meta">
+              <span class="user-center-meta-tag"><i data-lucide="shield-check" style="width:12px;height:12px;display:inline-block;vertical-align:-1px;"></i> 认证同行者</span>
+              <span id="uc-username">#--</span>
+            </div>
+
+            <div class="user-center-details-grid">
+              <div class="user-center-detail-item">
+                <strong>当前小队房间</strong>
+                <span id="uc-team-code">#666888</span>
+              </div>
+              <div class="user-center-detail-item">
+                <strong>紧急联络电话</strong>
+                <span id="uc-phone">未公开</span>
+              </div>
+              <div class="user-center-detail-item">
+                <strong>定位状态</strong>
+                <span style="color:var(--emerald-400);">实时同步中</span>
+              </div>
+              <div class="user-center-detail-item">
+                <strong>会话安全</strong>
+                <span>本地加密保持</span>
+              </div>
+            </div>
+
+            <div class="user-center-action-stack">
+              <button id="uc-edit-profile-btn" class="button button-primary button-full" type="button">
+                <i data-lucide="file-text"></i>
+                <span>完善出行与健康档案</span>
+              </button>
+              <button id="uc-switch-team-btn" class="button button-secondary button-full" type="button">
+                <i data-lucide="users"></i>
+                <span>切换或新建小队房间</span>
+              </button>
+              <button id="uc-logout-btn" class="button button-outline button-full" type="button" style="color:var(--rose-400);border-color:rgba(244,63,94,0.35);">
+                <i data-lucide="log-out"></i>
+                <span>退出登录 / 切换账号</span>
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>

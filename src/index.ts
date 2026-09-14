@@ -144,16 +144,16 @@ app.post('/api/auth/register', async (c) => {
   const name = String(body.name || '').trim() || `旅行者${username.slice(-4)}`;
   const phone = String(body.phone || '').trim();
 
-  // 校验账号与简易密码（支持纯数字、字母或任意组合）
+  // 校验账号与密码格式
   if (!username || username.length < 2) {
-    return c.json({ success: false, message: '账号长度至少需2位（支持纯数字、字母或任意组合）' }, 400);
+    return c.json({ success: false, message: '账号长度至少需2位字符（支持字母、数字或手机号）' }, 400);
   }
   if (!password || password.length < 3) {
-    return c.json({ success: false, message: '密码至少需3位字符（支持纯数字、字母或任意组合）' }, 400);
+    return c.json({ success: false, message: '密码长度至少需3位字符' }, 400);
   }
 
   if (users.has(username)) {
-    return c.json({ success: false, message: '该账号已被注册，可直接登录' }, 400);
+    return c.json({ success: false, message: '该账号已被注册，可直接切换至“登录”' }, 400);
   }
 
   const user: User = {
@@ -171,7 +171,7 @@ app.post('/api/auth/register', async (c) => {
 
   return c.json({
     success: true,
-    message: '注册并登录成功',
+    message: '注册成功，已自动为您登录',
     token,
     user: {
       id: user.id,
@@ -189,23 +189,28 @@ app.post('/api/auth/login', async (c) => {
   const password = String(body.password || '').trim();
 
   if (!username || !password) {
-    return c.json({ success: false, message: '请输入账号和密码（支持纯数字、字母或组合）' }, 400);
+    return c.json({ success: false, message: '请输入账号和密码' }, 400);
   }
 
-  // 若账号不存在，提供极简友好体验：自动免阻力注册并登录！
+  // 检查演示向导账号自动兜底
+  if (username === '888888' && !users.has('888888')) {
+    users.set('888888', {
+      id: 'user_888888',
+      username: '888888',
+      password: '123',
+      name: '阿泰 (曼谷向导)',
+      avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
+      phone: '+66 81 234 5678',
+    });
+  }
+
   let user = users.get(username);
   if (!user) {
-    user = {
-      id: `user_${username}`,
-      username,
-      password,
-      name: body.name || `行者${username.slice(-4)}`,
-      avatar: '',
-      phone: username,
-    };
-    users.set(username, user);
-  } else if (user.password !== password) {
-    return c.json({ success: false, message: '密码不匹配，请核对后重试' }, 401);
+    return c.json({ success: false, message: '账号不存在，请核对或切换至上方“注册新账号”' }, 404);
+  }
+
+  if (user.password !== password) {
+    return c.json({ success: false, message: '密码错误，请核对后重新输入' }, 401);
   }
 
   const token = `token_${username}_${Date.now()}`;
@@ -223,6 +228,15 @@ app.post('/api/auth/login', async (c) => {
       phone: user.phone,
     },
   });
+});
+
+app.post('/api/auth/logout', async (c) => {
+  const authHeader = c.req.header('Authorization') || '';
+  const token = authHeader.replace(/^Bearer\s+/i, '');
+  if (token) {
+    sessions.delete(token);
+  }
+  return c.json({ success: true, message: '已安全退出登录' });
 });
 
 app.get('/api/auth/me', (c) => {

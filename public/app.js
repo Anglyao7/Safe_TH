@@ -1451,20 +1451,41 @@ ${googleMapUrl}
   }
 
   // ==========================================
-  // 用户鉴权系统 (纯数字简易登录/注册)
+  // 用户鉴权系统 (支持登录/注册选项卡、密码可见性切换、个人中心)
   // ==========================================
+  function bindPasswordToggle(toggleBtnId, inputId) {
+    const btn = document.getElementById(toggleBtnId);
+    const input = document.getElementById(inputId);
+    if (!btn || !input) return;
+
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const isPwd = input.type === 'password';
+      input.type = isPwd ? 'text' : 'password';
+      btn.innerHTML = `<i data-lucide="${isPwd ? 'eye-off' : 'eye'}"></i>`;
+      btn.setAttribute('title', isPwd ? '隐藏密码' : '显示密码');
+      initIcons();
+    });
+  }
+
   function initAuthSystem() {
     const userBtn = document.getElementById('top-user-btn');
     const authModal = document.getElementById('auth-modal');
     const closeAuthBtn = document.getElementById('close-auth-modal');
-    const authForm = document.getElementById('auth-form');
-    const authDemoBtn = document.getElementById('auth-demo-btn');
+    const userCenterModal = document.getElementById('user-center-modal');
+    const closeUserCenterBtn = document.getElementById('close-user-center-modal');
+
+    // 绑定密码眼睛显示/隐藏切换
+    bindPasswordToggle('toggle-login-pwd-btn', 'login-password');
+    bindPasswordToggle('toggle-reg-pwd-btn', 'reg-password');
+    bindPasswordToggle('toggle-reg-confirm-pwd-btn', 'reg-confirm-password');
 
     // 若无登录用户，生成临时数字访客
     if (!state.user) {
       const randomNum = String(Math.floor(100000 + Math.random() * 900000));
       state.user = {
-        id: `user_${randomNum}`,
+        id: `user_guest_${randomNum}`,
         username: randomNum,
         name: state.profile.name || `行者${randomNum.slice(-3)}`,
         avatar: state.profile.avatar || '',
@@ -1474,99 +1495,355 @@ ${googleMapUrl}
 
     updateAuthUI();
 
-    if (userBtn && authModal) {
+    // 选项卡切换控制
+    const tabLogin = document.getElementById('auth-tab-login');
+    const tabRegister = document.getElementById('auth-tab-register');
+    const formLogin = document.getElementById('auth-login-form');
+    const formRegister = document.getElementById('auth-register-form');
+    const switchToRegBtn = document.getElementById('login-switch-to-register');
+    const switchToLoginBtn = document.getElementById('register-switch-to-login');
+
+    function setAuthTab(tab) {
+      if (tab === 'login') {
+        tabLogin?.classList.add('active');
+        tabLogin?.setAttribute('aria-selected', 'true');
+        tabRegister?.classList.remove('active');
+        tabRegister?.setAttribute('aria-selected', 'false');
+        formLogin?.removeAttribute('hidden');
+        formRegister?.setAttribute('hidden', '');
+        setTimeout(() => document.getElementById('login-username')?.focus(), 50);
+      } else {
+        tabRegister?.classList.add('active');
+        tabRegister?.setAttribute('aria-selected', 'true');
+        tabLogin?.classList.remove('active');
+        tabLogin?.setAttribute('aria-selected', 'false');
+        formRegister?.removeAttribute('hidden');
+        formLogin?.setAttribute('hidden', '');
+        setTimeout(() => document.getElementById('reg-username')?.focus(), 50);
+      }
+    }
+
+    if (tabLogin) tabLogin.addEventListener('click', () => setAuthTab('login'));
+    if (tabRegister) tabRegister.addEventListener('click', () => setAuthTab('register'));
+    if (switchToRegBtn) switchToRegBtn.addEventListener('click', () => setAuthTab('register'));
+    if (switchToLoginBtn) switchToLoginBtn.addEventListener('click', () => setAuthTab('login'));
+
+    // 顶栏用户胶囊点击：根据登录态智能弹出「个人中心」或「登录/注册」
+    if (userBtn) {
       userBtn.addEventListener('click', () => {
-        const usernameInput = document.getElementById('auth-username');
-        const nameInput = document.getElementById('auth-name');
-        if (usernameInput) usernameInput.value = state.user?.username || '';
-        if (nameInput) nameInput.value = state.profile.name || state.user?.name || '';
-        authModal.removeAttribute('hidden');
+        const isLoggedIn = Boolean(state.token && state.user && state.user.id && !state.user.id.startsWith('user_guest'));
+        if (isLoggedIn) {
+          updateUserCenterUI();
+          if (userCenterModal) userCenterModal.removeAttribute('hidden');
+        } else {
+          setAuthTab('login');
+          if (authModal) authModal.removeAttribute('hidden');
+        }
       });
     }
 
+    // 关闭登录弹窗
     if (closeAuthBtn && authModal) {
-      closeAuthBtn.addEventListener('click', () => {
-        authModal.setAttribute('hidden', '');
-      });
+      closeAuthBtn.addEventListener('click', () => authModal.setAttribute('hidden', ''));
       authModal.addEventListener('click', (e) => {
         if (e.target === authModal) authModal.setAttribute('hidden', '');
       });
     }
 
-    if (authDemoBtn) {
-      authDemoBtn.addEventListener('click', () => {
-        const u = document.getElementById('auth-username');
-        const p = document.getElementById('auth-password');
-        const n = document.getElementById('auth-name');
+    // 关闭用户中心弹窗
+    if (closeUserCenterBtn && userCenterModal) {
+      closeUserCenterBtn.addEventListener('click', () => userCenterModal.setAttribute('hidden', ''));
+      userCenterModal.addEventListener('click', (e) => {
+        if (e.target === userCenterModal) userCenterModal.setAttribute('hidden', '');
+      });
+    }
+
+    // 用户中心内部按钮操作
+    const ucEditProfileBtn = document.getElementById('uc-edit-profile-btn');
+    if (ucEditProfileBtn) {
+      ucEditProfileBtn.addEventListener('click', () => {
+        userCenterModal?.setAttribute('hidden', '');
+        const profileNavBtn = document.querySelector('[data-view="profile"]');
+        if (profileNavBtn) profileNavBtn.click();
+      });
+    }
+
+    const ucSwitchTeamBtn = document.getElementById('uc-switch-team-btn');
+    if (ucSwitchTeamBtn) {
+      ucSwitchTeamBtn.addEventListener('click', () => {
+        userCenterModal?.setAttribute('hidden', '');
+        const teamModal = document.getElementById('team-modal');
+        const input = document.getElementById('team-code-input');
+        if (input) input.value = state.teamCode;
+        teamModal?.removeAttribute('hidden');
+      });
+    }
+
+    const ucLogoutBtn = document.getElementById('uc-logout-btn');
+    if (ucLogoutBtn) {
+      ucLogoutBtn.addEventListener('click', () => {
+        performLogout();
+      });
+    }
+
+    // 演示向导快捷填入按钮
+    const loginDemoBtn = document.getElementById('login-demo-btn');
+    if (loginDemoBtn) {
+      loginDemoBtn.addEventListener('click', () => {
+        const u = document.getElementById('login-username');
+        const p = document.getElementById('login-password');
         if (u) u.value = '888888';
         if (p) p.value = '123';
-        if (n) n.value = '阿泰 (曼谷向导)';
-        submitAuthLogin('888888', '123', '阿泰 (曼谷向导)');
+        submitLogin('888888', '123', true);
       });
     }
 
-    if (authForm) {
-      authForm.addEventListener('submit', (e) => {
+    // 登录表单提交
+    if (formLogin) {
+      formLogin.addEventListener('submit', (e) => {
         e.preventDefault();
-        const username = document.getElementById('auth-username')?.value.trim();
-        const password = document.getElementById('auth-password')?.value.trim();
-        const name = document.getElementById('auth-name')?.value.trim();
-        submitAuthLogin(username, password, name);
+        const username = document.getElementById('login-username')?.value.trim();
+        const password = document.getElementById('login-password')?.value.trim();
+        const remember = document.getElementById('login-remember')?.checked ?? true;
+        submitLogin(username, password, remember);
       });
     }
+
+    // 注册表单提交
+    if (formRegister) {
+      formRegister.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const username = document.getElementById('reg-username')?.value.trim();
+        const name = document.getElementById('reg-name')?.value.trim();
+        const password = document.getElementById('reg-password')?.value.trim();
+        const confirmPassword = document.getElementById('reg-confirm-password')?.value.trim();
+        const phone = document.getElementById('reg-phone')?.value.trim();
+
+        if (password !== confirmPassword) {
+          showToast('两次输入的密码不一致，请核对后重新输入', 'error');
+          document.getElementById('reg-confirm-password')?.focus();
+          return;
+        }
+
+        submitRegister(username, password, name, phone);
+      });
+    }
+
+    // 按 ESC 键关闭弹窗
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        authModal?.setAttribute('hidden', '');
+        userCenterModal?.setAttribute('hidden', '');
+      }
+    });
   }
 
-  function submitAuthLogin(username, password, name) {
+  function submitLogin(username, password, remember = true) {
     const authModal = document.getElementById('auth-modal');
+    const submitBtn = document.getElementById('login-submit-btn');
+
+    if (!username || !password) {
+      showToast('请输入完整的账号与密码', 'error');
+      return;
+    }
+
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = `<i data-lucide="loader-2" class="animate-spin"></i><span>登录验证中...</span>`;
+      initIcons();
+    }
+
     fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password, name }),
+      body: JSON.stringify({ username, password }),
     })
       .then((res) => res.json())
       .then((data) => {
         if (data.success) {
           state.user = data.user;
           state.token = data.token;
-          try {
-            localStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, data.token);
-            localStorage.setItem(STORAGE_KEYS.AUTH_USER, JSON.stringify(data.user));
-          } catch (e) {}
 
-          if (name && !state.profile.name) {
-            state.profile.name = name;
+          if (remember) {
+            try {
+              localStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, data.token);
+              localStorage.setItem(STORAGE_KEYS.AUTH_USER, JSON.stringify(data.user));
+            } catch (e) {}
+          }
+
+          if (data.user.name && !state.profile.name) {
+            state.profile.name = data.user.name;
             saveProfileData();
           }
 
-          if (authModal) authModal.setAttribute('hidden', '');
+          authModal?.setAttribute('hidden', '');
           updateAuthUI();
           updateAllViews();
           reportMyLocation();
-          showToast(`登录成功！当前数字账号：#${data.user.username}`);
+          showToast(`登录成功！欢迎同行者【${data.user.name || data.user.username}】`);
         } else {
           showToast(data.message || '登录失败，请检查账号密码', 'error');
         }
       })
       .catch((err) => {
-        showToast('请求登录接口异常: ' + err.message, 'error');
+        showToast('登录接口网络异常: ' + err.message, 'error');
+      })
+      .finally(() => {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = `<i data-lucide="log-in"></i><span>立即安全登录</span>`;
+          initIcons();
+        }
       });
+  }
+
+  function submitRegister(username, password, name, phone) {
+    const authModal = document.getElementById('auth-modal');
+    const submitBtn = document.getElementById('reg-submit-btn');
+
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = `<i data-lucide="loader-2" class="animate-spin"></i><span>注册创建中...</span>`;
+      initIcons();
+    }
+
+    fetch('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password, name, phone }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success) {
+          state.user = data.user;
+          state.token = data.token;
+
+          try {
+            localStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, data.token);
+            localStorage.setItem(STORAGE_KEYS.AUTH_USER, JSON.stringify(data.user));
+          } catch (e) {}
+
+          if (name) {
+            state.profile.name = name;
+          }
+          if (phone) {
+            state.profile.phone = phone;
+          }
+          saveProfileData();
+
+          authModal?.setAttribute('hidden', '');
+          updateAuthUI();
+          updateAllViews();
+          reportMyLocation();
+          showToast(`🎉 注册成功！欢迎加入同行小队：【${data.user.name}】`);
+        } else {
+          showToast(data.message || '注册失败，请稍后重试', 'error');
+        }
+      })
+      .catch((err) => {
+        showToast('注册接口异常: ' + err.message, 'error');
+      })
+      .finally(() => {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = `<i data-lucide="user-plus"></i><span>完成注册并加入同行小队</span>`;
+          initIcons();
+        }
+      });
+  }
+
+  function performLogout() {
+    const userCenterModal = document.getElementById('user-center-modal');
+
+    // 远程注销会话
+    if (state.token) {
+      fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${state.token}`,
+        },
+      }).catch(() => {});
+    }
+
+    // 本地清除登录态
+    state.token = null;
+    try {
+      localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
+      localStorage.removeItem(STORAGE_KEYS.AUTH_USER);
+    } catch (e) {}
+
+    // 重置为临时访客
+    const randomNum = String(Math.floor(100000 + Math.random() * 900000));
+    state.user = {
+      id: `user_guest_${randomNum}`,
+      username: randomNum,
+      name: `行者${randomNum.slice(-3)}`,
+      avatar: '',
+      phone: '',
+    };
+
+    userCenterModal?.setAttribute('hidden', '');
+    updateAuthUI();
+    updateAllViews();
+    reportMyLocation();
+
+    showToast('已安全退出当前账号，进入访客守护模式');
+  }
+
+  function updateUserCenterUI() {
+    if (!state.user) return;
+    const ucAvatar = document.getElementById('uc-avatar');
+    const ucName = document.getElementById('uc-name');
+    const ucUsername = document.getElementById('uc-username');
+    const ucTeam = document.getElementById('uc-team-code');
+    const ucPhone = document.getElementById('uc-phone');
+
+    if (ucName) ucName.textContent = state.user.name || state.profile.name || '同行旅行者';
+    if (ucUsername) ucUsername.textContent = `#${state.user.username || '--'}`;
+    if (ucTeam) ucTeam.textContent = `#${state.teamCode || '666888'}`;
+    if (ucPhone) ucPhone.textContent = state.user.phone || state.profile.phone || '未公开';
+
+    if (ucAvatar) {
+      const avatarUrl = state.profile.avatar || state.user.avatar;
+      if (avatarUrl) {
+        ucAvatar.innerHTML = `<img src="${avatarUrl}" alt="Avatar">`;
+      } else {
+        const initial = (state.user.name || state.user.username || '用').charAt(0);
+        ucAvatar.textContent = initial;
+      }
+    }
   }
 
   function updateAuthUI() {
     const topAvatar = document.getElementById('top-user-avatar');
     const topName = document.getElementById('top-user-name');
-    if (!state.user) return;
+    const userPill = document.getElementById('top-user-btn');
+
+    const isLoggedIn = Boolean(state.token && state.user && state.user.id && !state.user.id.startsWith('user_guest'));
+
+    if (userPill) {
+      userPill.setAttribute('title', isLoggedIn ? '点击打开同行个人中心' : '点击登录或注册同行账号');
+    }
 
     if (topName) {
-      topName.textContent = state.user.name || `#${state.user.username}`;
-    }
-    if (topAvatar) {
-      if (state.profile.avatar || state.user.avatar) {
-        topAvatar.innerHTML = `<img src="${state.profile.avatar || state.user.avatar}" alt="Avatar">`;
+      if (isLoggedIn) {
+        topName.textContent = state.user.name || `#${state.user.username}`;
       } else {
-        topAvatar.textContent = (state.user.name || state.user.username || '用').charAt(0);
+        topName.textContent = '登录 / 注册';
       }
     }
+
+    if (topAvatar) {
+      if (state.profile.avatar || (state.user && state.user.avatar)) {
+        topAvatar.innerHTML = `<img src="${state.profile.avatar || state.user.avatar}" alt="Avatar">`;
+      } else if (state.user && state.user.name && isLoggedIn) {
+        topAvatar.textContent = state.user.name.charAt(0);
+      } else {
+        topAvatar.textContent = '登';
+      }
+    }
+
+    updateUserCenterUI();
     updateMyRadarMarker();
   }
 
