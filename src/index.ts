@@ -65,11 +65,14 @@ const storedImages = new Map<string, StoredImage>();
 // 2. 存活探针与应急官方电话接口
 // ============================================================================
 app.get('/api/health', (c) => {
+  const kv = getKV(c);
   return c.json({
     status: 'ok',
     service: '护途 · 泰国行程安全中心 (HuTu Console)',
     timestamp: new Date().toISOString(),
     region: 'Cloudflare Edge',
+    kvConnected: !!kv,
+    detectedBindings: Object.keys(c.env || {}),
     features: {
       emergencySos: true,
       geoTracking: true,
@@ -118,26 +121,48 @@ app.get('/api/emergency-contacts', (c) => {
 });
 
 // ============================================================================
-// 2.5 全球持久化存储适配层：优先接入 Cloudflare KV，无 KV 绑定时优雅降级至内存 Map
+// 2.5 全球持久化存储适配层：多别名自动探测 Cloudflare KV，无绑定时降级至内存
 // ============================================================================
+function getKV(c: any): any {
+  if (!c.env) return null;
+  if (c.env.SAFETY_KV) return c.env.SAFETY_KV;
+  if (c.env.safety_kv) return c.env.safety_kv;
+  if (c.env.safety_storage) return c.env.safety_storage;
+  if (c.env.SAFETY_STORAGE) return c.env.SAFETY_STORAGE;
+  if (c.env.KV) return c.env.KV;
+  for (const key of Object.keys(c.env)) {
+    if (key !== 'ASSETS' && c.env[key] && typeof c.env[key].get === 'function' && typeof c.env[key].put === 'function') {
+      return c.env[key];
+    }
+  }
+  return null;
+}
+
 async function findUser(c: any, username: string): Promise<User | null> {
-  if (c.env?.SAFETY_KV) {
+  const kv = getKV(c);
+  const lower = username.toLowerCase().trim();
+  if (kv) {
     try {
-      const data = await c.env.SAFETY_KV.get(`user:${username}`);
+      let data = await kv.get(`user:${lower}`);
+      if (!data) data = await kv.get(`user:${username}`);
       if (data) return JSON.parse(data);
     } catch (e) {
       console.warn('KV read user error:', e);
     }
   }
-  return users.get(username) || null;
+  return users.get(lower) || users.get(username) || null;
 }
 
 async function persistUser(c: any, user: User): Promise<void> {
+  const lower = user.username.toLowerCase().trim();
+  users.set(lower, user);
   users.set(user.username, user);
-  if (c.env?.SAFETY_KV) {
+  const kv = getKV(c);
+  if (kv) {
     try {
-      await c.env.SAFETY_KV.put(`user:${user.username}`, JSON.stringify(user));
-      await c.env.SAFETY_KV.put(`user_id:${user.id}`, JSON.stringify(user));
+      await kv.put(`user:${lower}`, JSON.stringify(user));
+      await kv.put(`user:${user.username}`, JSON.stringify(user));
+      await kv.put(`user_id:${user.id}`, JSON.stringify(user));
     } catch (e) {
       console.warn('KV put user error:', e);
     }
@@ -145,9 +170,10 @@ async function persistUser(c: any, user: User): Promise<void> {
 }
 
 async function findSession(c: any, token: string): Promise<string | null> {
-  if (c.env?.SAFETY_KV) {
+  const kv = getKV(c);
+  if (kv) {
     try {
-      const username = await c.env.SAFETY_KV.get(`session:${token}`);
+      const username = await kv.get(`session:${token}`);
       if (username) return username;
     } catch (e) {
       console.warn('KV read session error:', e);
@@ -158,9 +184,10 @@ async function findSession(c: any, token: string): Promise<string | null> {
 
 async function persistSession(c: any, token: string, username: string): Promise<void> {
   sessions.set(token, username);
-  if (c.env?.SAFETY_KV) {
+  const kv = getKV(c);
+  if (kv) {
     try {
-      await c.env.SAFETY_KV.put(`session:${token}`, username, { expirationTtl: 86400 * 30 });
+      await kv.put(`session:${token}`, username, { expirationTtl: 86400 * 30 });
     } catch (e) {
       console.warn('KV put session error:', e);
     }
@@ -169,17 +196,19 @@ async function persistSession(c: any, token: string, username: string): Promise<
 
 async function removeSession(c: any, token: string): Promise<void> {
   sessions.delete(token);
-  if (c.env?.SAFETY_KV) {
+  const kv = getKV(c);
+  if (kv) {
     try {
-      await c.env.SAFETY_KV.delete(`session:${token}`);
+      await kv.delete(`session:${token}`);
     } catch (e) {}
   }
 }
 
 async function findRoom(c: any, teamCode: string): Promise<TeamRoom | null> {
-  if (c.env?.SAFETY_KV) {
+  const kv = getKV(c);
+  if (kv) {
     try {
-      const data = await c.env.SAFETY_KV.get(`room:${teamCode}`);
+      const data = await kv.get(`room:${teamCode}`);
       if (data) {
         const parsed = JSON.parse(data);
         const room: TeamRoom = {
@@ -200,7 +229,8 @@ async function findRoom(c: any, teamCode: string): Promise<TeamRoom | null> {
 
 async function persistRoom(c: any, room: TeamRoom): Promise<void> {
   teamRooms.set(room.code, room);
-  if (c.env?.SAFETY_KV) {
+  const kv = getKV(c);
+  if (kv) {
     try {
       const raw = {
         code: room.code,
@@ -210,7 +240,7 @@ async function persistRoom(c: any, room: TeamRoom): Promise<void> {
         kickedUserIds: Array.from(room.kickedUserIds),
         disbanded: room.disbanded || false,
       };
-      await c.env.SAFETY_KV.put(`room:${room.code}`, JSON.stringify(raw), { expirationTtl: 86400 * 14 });
+      await kv.put(`room:${room.code}`, JSON.stringify(raw), { expirationTtl: 86400 * 14 });
     } catch (e) {}
   }
 }
@@ -218,9 +248,10 @@ async function persistRoom(c: any, room: TeamRoom): Promise<void> {
 async function removeRoom(c: any, teamCode: string): Promise<void> {
   teamRooms.delete(teamCode);
   teamLocations.delete(teamCode);
-  if (c.env?.SAFETY_KV) {
+  const kv = getKV(c);
+  if (kv) {
     try {
-      await c.env.SAFETY_KV.delete(`room:${teamCode}`);
+      await kv.delete(`room:${teamCode}`);
     } catch (e) {}
   }
 }
@@ -233,24 +264,26 @@ async function persistMemberLocation(c: any, teamCode: string, memberLoc: TeamMe
   }
   team.set(memberLoc.userId, memberLoc);
 
-  if (c.env?.SAFETY_KV) {
+  const kv = getKV(c);
+  if (kv) {
     try {
-      await c.env.SAFETY_KV.put(`member:${teamCode}:${memberLoc.userId}`, JSON.stringify(memberLoc), { expirationTtl: 1800 });
-      await c.env.SAFETY_KV.put(`track:${memberLoc.username}`, JSON.stringify({ ...memberLoc, teamCode }), { expirationTtl: 86400 * 3 });
-      await c.env.SAFETY_KV.put(`track:${memberLoc.userId}`, JSON.stringify({ ...memberLoc, teamCode }), { expirationTtl: 86400 * 3 });
+      await kv.put(`member:${teamCode}:${memberLoc.userId}`, JSON.stringify(memberLoc), { expirationTtl: 1800 });
+      await kv.put(`track:${memberLoc.username}`, JSON.stringify({ ...memberLoc, teamCode }), { expirationTtl: 86400 * 3 });
+      await kv.put(`track:${memberLoc.userId}`, JSON.stringify({ ...memberLoc, teamCode }), { expirationTtl: 86400 * 3 });
     } catch (e) {}
   }
 }
 
 async function getTeamMembersList(c: any, teamCode: string): Promise<TeamMemberLocation[]> {
   const now = Date.now();
-  if (c.env?.SAFETY_KV) {
+  const kv = getKV(c);
+  if (kv) {
     try {
-      const list = await c.env.SAFETY_KV.list({ prefix: `member:${teamCode}:` });
+      const list = await kv.list({ prefix: `member:${teamCode}:` });
       if (list && list.keys && list.keys.length > 0) {
         const mems: TeamMemberLocation[] = [];
         for (const k of list.keys) {
-          const val = await c.env.SAFETY_KV.get(k.name);
+          const val = await kv.get(k.name);
           if (val) {
             try {
               const loc: TeamMemberLocation = JSON.parse(val);
@@ -280,9 +313,10 @@ async function getTeamMembersList(c: any, teamCode: string): Promise<TeamMemberL
 async function removeMemberFromTeam(c: any, teamCode: string, userId: string): Promise<void> {
   const team = teamLocations.get(teamCode);
   if (team) team.delete(userId);
-  if (c.env?.SAFETY_KV) {
+  const kv = getKV(c);
+  if (kv) {
     try {
-      await c.env.SAFETY_KV.delete(`member:${teamCode}:${userId}`);
+      await kv.delete(`member:${teamCode}:${userId}`);
     } catch (e) {}
   }
 }
@@ -774,9 +808,10 @@ app.post('/api/upload', async (c) => {
       filename,
     });
 
-    if (c.env?.SAFETY_KV) {
+    const kv = getKV(c);
+    if (kv) {
       try {
-        await c.env.SAFETY_KV.put(`img:${imageId}`, arrayBuffer, {
+        await kv.put(`img:${imageId}`, arrayBuffer, {
           metadata: { mimeType, filename },
           expirationTtl: 86400 * 30,
         });
@@ -812,9 +847,10 @@ app.get('/api/images/:id', async (c) => {
     });
   }
 
-  if (c.env?.SAFETY_KV) {
+  const kv = getKV(c);
+  if (kv) {
     try {
-      const kvResult = await c.env.SAFETY_KV.getWithMetadata<{ mimeType?: string; filename?: string }>(`img:${id}`, 'arrayBuffer');
+      const kvResult = (await kv.getWithMetadata(`img:${id}`, 'arrayBuffer')) as any;
       if (kvResult && kvResult.value) {
         const mimeType = kvResult.metadata?.mimeType || 'image/jpeg';
         const filename = kvResult.metadata?.filename || `${id}.jpg`;
