@@ -76,12 +76,31 @@
     },
   };
 
+  function isChinaCoordinate(lng, lat, addressCountry) {
+    if (addressCountry) {
+      return addressCountry === '中国' || addressCountry === 'China';
+    }
+    if (lat < 18.0 || lat > 54.0 || lng < 73.0 || lng > 135.5) return false;
+    if (lat < 21.2 && lng < 107.5) return false;
+    return true;
+  }
+
   function getStoredMapSource() {
     try {
       const s = localStorage.getItem('thai_service_map_source');
       if (s && MAP_SOURCES[s]) return s;
     } catch (e) {}
-    return 'amap';
+    try {
+      const savedLoc = localStorage.getItem(STORAGE_KEYS.LAST_LOCATION);
+      if (savedLoc) {
+        const loc = JSON.parse(savedLoc);
+        if (loc && loc.lng && loc.lat && isChinaCoordinate(loc.lng, loc.lat)) {
+          return 'amap';
+        }
+      }
+    } catch (e) {}
+    // 默认展示泰国曼谷，泰国/海外默认必须加载全球标准出行线图 (OSM)
+    return 'osm';
   }
 
   function createTileLayer(sourceId) {
@@ -382,6 +401,12 @@
 
     const initialLat = state.location.lat || DEFAULT_BANGKOK.lat;
     const initialLng = state.location.lng || DEFAULT_BANGKOK.lng;
+
+    // 若当前坐标在泰国/海外，且当前底图为高德（高德海外为空白），自动智能采用全球线图 OSM
+    if (!isChinaCoordinate(initialLng, initialLat) && (state.currentMapSource === 'amap' || state.currentMapSource === 'sat')) {
+      state.currentMapSource = 'osm';
+    }
+
     const disp = toMapCoordinate(initialLat, initialLng);
 
     state.map = L.map('map', {
@@ -389,7 +414,7 @@
       attributionControl: false,
     }).setView([disp.lat, disp.lng], 12);
 
-    // 默认加载高德官方矢量线图，纯净无水印
+    // 加载纯净无水印底图
     state.tileLayer = createTileLayer(state.currentMapSource).addTo(state.map);
 
     // 定制高科技脉冲标记
@@ -435,15 +460,6 @@
   let amapGeolocationInstance = null;
   let amapGeocoderInstance = null;
   let isCalibrating = false;
-
-  function isChinaCoordinate(lng, lat, addressCountry) {
-    if (addressCountry) {
-      return addressCountry === '中国' || addressCountry === 'China';
-    }
-    if (lat < 18.0 || lat > 54.0 || lng < 73.0 || lng > 135.5) return false;
-    if (lat < 21.2 && lng < 107.5) return false;
-    return true;
-  }
 
   function transformLat(x, y) {
     let ret = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x));
@@ -576,7 +592,13 @@
     updateTeamMapMarkers();
 
     if (notify) {
-      showToast(`底图已切换至：${src.fullName} (纯净无水印)`);
+      const myLat = state.location.lat || DEFAULT_BANGKOK.lat;
+      const myLng = state.location.lng || DEFAULT_BANGKOK.lng;
+      if ((sourceId === 'amap' || sourceId === 'sat') && !isChinaCoordinate(myLng, myLat)) {
+        showToast(`已切换至【${src.fullName}】。⚠️ 提示：高德官方底图仅覆盖中国大陆港澳，泰国等海外为空白。查看泰国请选用【全球标准出行线图 (OSM)】！`, 'warning');
+      } else {
+        showToast(`底图已切换至：${src.fullName} (纯净无水印)`);
+      }
     }
   }
 
@@ -681,10 +703,19 @@
 
     let finalLng = rawLng;
     let finalLat = rawLat;
-    if (isChinaCoordinate(rawLng, rawLat, country)) {
+    const isDomestic = isChinaCoordinate(rawLng, rawLat, country);
+    if (isDomestic) {
       const wgs = gcj02ToWgs84(rawLng, rawLat);
       finalLng = wgs.lng;
       finalLat = wgs.lat;
+      if (state.currentMapSource !== 'amap' && !localStorage.getItem('thai_service_map_source')) {
+        switchMapSource('amap', false);
+      }
+    } else {
+      if (state.currentMapSource === 'amap' || state.currentMapSource === 'sat') {
+        switchMapSource('osm', false);
+        showToast('检测到当前位于泰国/海外，高德切片仅限中国境内，已自动为您启用【全球标准出行线图 (OSM)】！');
+      }
     }
 
     const accuracy = Math.round(result.accuracy || 20);
@@ -737,6 +768,13 @@
       (pos) => {
         const { latitude, longitude, accuracy } = pos.coords;
         const nowStr = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+
+        if (!isChinaCoordinate(longitude, latitude)) {
+          if (state.currentMapSource === 'amap' || state.currentMapSource === 'sat') {
+            switchMapSource('osm', false);
+            showToast('检测到当前位于泰国/海外，已自动为您切换为【全球标准出行线图 (OSM)】！');
+          }
+        }
 
         state.location = {
           lat: Number(latitude.toFixed(6)),
@@ -1609,6 +1647,12 @@ ${googleMapUrl}
 
     const initialLat = state.location.lat || DEFAULT_BANGKOK.lat;
     const initialLng = state.location.lng || DEFAULT_BANGKOK.lng;
+
+    // 若当前坐标在泰国/海外，且当前底图为高德（高德海外为空白），自动智能采用全球线图 OSM
+    if (!isChinaCoordinate(initialLng, initialLat) && (state.currentMapSource === 'amap' || state.currentMapSource === 'sat')) {
+      state.currentMapSource = 'osm';
+    }
+
     const disp = toMapCoordinate(initialLat, initialLng);
 
     state.radarMap = L.map('radar-fullscreen-map', {
@@ -1616,7 +1660,7 @@ ${googleMapUrl}
       attributionControl: false,
     }).setView([disp.lat, disp.lng], 13);
 
-    // 默认加载高德官方矢量线图，纯净无水印
+    // 加载纯净无水印底图
     state.radarTileLayer = createTileLayer(state.currentMapSource).addTo(state.radarMap);
 
     updateMyRadarMarker();
