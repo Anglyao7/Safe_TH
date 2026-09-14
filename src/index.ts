@@ -1,19 +1,19 @@
 import { Hono } from 'hono';
+import { HARDCODED_ACCOUNTS, findHardcodedAccount, UserAccount } from './accounts';
 
 type Bindings = {
   ASSETS?: Fetcher;
-  SAFETY_KV?: KVNamespace;
 };
 
 const app = new Hono<{ Bindings: Bindings }>();
 
 // ============================================================================
-// 1. 服务端内存数据存储 (在 Worker 实例周期内保持，配合本地开发与测试)
+// 1. 服务端内存数据存储 (配合 accounts.ts 固化文件，完全脱离 KV 限制)
 // ============================================================================
 interface User {
   id: string;
-  username: string; // 纯数字账号
-  password: string; // 纯数字密码
+  username: string; // 账号
+  password: string; // 密码
   name: string;
   avatar: string;
   phone: string;
@@ -59,26 +59,49 @@ const teamRooms = new Map<string, TeamRoom>(); // teamCode -> TeamRoom
 const userLatestLocations = new Map<string, UserTrackingLocation>(); // identifier -> latest location
 const storedImages = new Map<string, StoredImage>();
 
-
+// 初始化系统固化正式队员数据到内存
+function initHardcodedAccounts(): void {
+  for (const acc of HARDCODED_ACCOUNTS) {
+    const u: User = {
+      id: acc.id,
+      username: acc.username,
+      password: acc.password,
+      name: acc.name,
+      avatar: acc.avatar || '',
+      phone: acc.phone || '',
+    };
+    users.set(acc.username.toLowerCase(), u);
+    users.set(acc.username, u);
+    users.set(acc.id, u);
+    if (acc.phone) {
+      const phoneDigits = acc.phone.replace(/\D/g, '');
+      if (phoneDigits) users.set(`phone:${phoneDigits}`, u);
+    }
+    for (const alias of acc.aliases) {
+      users.set(alias.toLowerCase(), u);
+    }
+  }
+}
+initHardcodedAccounts();
 
 // ============================================================================
 // 2. 存活探针与应急官方电话接口
 // ============================================================================
 app.get('/api/health', (c) => {
-  const kv = getKV(c);
   return c.json({
     status: 'ok',
     service: '护途 · 泰国行程安全中心 (HuTu Console)',
     timestamp: new Date().toISOString(),
     region: 'Cloudflare Edge',
-    kvConnected: !!kv,
+    storage: 'file_hardcoded',
+    accountsTotal: HARDCODED_ACCOUNTS.length,
     detectedBindings: Object.keys(c.env || {}),
     features: {
       emergencySos: true,
       geoTracking: true,
       teamLiveRadar: true,
       imageUpload: true,
-      auth: 'minimal_numeric',
+      auth: 'file_hardcoded',
     },
   });
 });
@@ -133,70 +156,38 @@ app.get('/api/emergency-contacts', (c) => {
 });
 
 // ============================================================================
-// 2.5 全球持久化存储适配层：多别名自动探测 Cloudflare KV，无绑定时降级至内存
+// 2.5 固化文件与内存适配层：脱离 KV 限制，零配额消耗，极速响应
 // ============================================================================
-function getKV(c: any): any {
-  if (!c.env) return null;
-  if (c.env.SAFETY_KV) return c.env.SAFETY_KV;
-  if (c.env.safety_kv) return c.env.safety_kv;
-  if (c.env.safety_storage) return c.env.safety_storage;
-  if (c.env.SAFETY_STORAGE) return c.env.SAFETY_STORAGE;
-  if (c.env.KV) return c.env.KV;
-  for (const key of Object.keys(c.env)) {
-    if (key !== 'ASSETS' && c.env[key] && typeof c.env[key].get === 'function' && typeof c.env[key].put === 'function') {
-      return c.env[key];
-    }
-  }
-  return null;
-}
-
 async function findUser(c: any, username: string): Promise<User | null> {
-  const kv = getKV(c);
   const lower = username.toLowerCase().trim();
   const digitsOnly = lower.replace(/\D/g, '');
 
-  if (kv) {
-    try {
-      // 1. 直接查询精确与小写键
-      let data = await kv.get(`user:${lower}`);
-      if (!data) data = await kv.get(`user:${username}`);
-      if (!data && digitsOnly.length >= 7) {
-        data = await kv.get(`user_phone:${digitsOnly}`);
-      }
-      if (data) return JSON.parse(data);
-
-      // 2. 遍历现有用户进行模糊别名匹配 (如输入 anglyao 匹配 Anglyao778@gmail.com，或手机号匹配)
-      const list = await kv.list({ prefix: 'user:' });
-      if (list && list.keys) {
-        for (const k of list.keys) {
-          const raw = await kv.get(k.name);
-          if (raw) {
-            try {
-              const u: User = JSON.parse(raw);
-              const uLower = (u.username || '').toLowerCase();
-              const uPhoneDigits = (u.phone || '').replace(/\D/g, '');
-
-              // 账号或邮箱全名一致
-              if (uLower === lower) return u;
-              // 手机号末尾匹配
-              if (digitsOnly.length >= 7 && uPhoneDigits.endsWith(digitsOnly)) return u;
-              // 邮箱前缀匹配 (例如用户输入 anglyao 匹配 Anglyao778@gmail.com)
-              if (uLower.includes('@')) {
-                const prefix = uLower.split('@')[0];
-                if (prefix === lower || prefix.startsWith(lower) || lower.startsWith(prefix)) {
-                  return u;
-                }
-              }
-            } catch (e) {}
-          }
-        }
-      }
-    } catch (e) {
-      console.warn('KV read user error:', e);
-    }
+  // 1. 优先从内存 users 中查找（包含已修改密码后的用户及动态注册用户）
+  if (users.has(lower)) return users.get(lower)!;
+  if (users.has(username)) return users.get(username)!;
+  if (digitsOnly.length >= 7 && users.has(`phone:${digitsOnly}`)) {
+    return users.get(`phone:${digitsOnly}`)!;
   }
 
-  // 内存备用匹配
+  // 2. 检查固化 accounts.ts 文件规则与别名模糊匹配
+  const hardcoded = findHardcodedAccount(username);
+  if (hardcoded) {
+    const existing = users.get(hardcoded.username.toLowerCase()) || users.get(hardcoded.username);
+    if (existing) return existing;
+    const u: User = {
+      id: hardcoded.id,
+      username: hardcoded.username,
+      password: hardcoded.password,
+      name: hardcoded.name,
+      avatar: hardcoded.avatar || '',
+      phone: hardcoded.phone || '',
+    };
+    users.set(hardcoded.username.toLowerCase(), u);
+    users.set(hardcoded.username, u);
+    return u;
+  }
+
+  // 3. 内存备用别名模糊匹配 (如手机号末尾匹配或邮箱前缀匹配)
   for (const [, u] of users.entries()) {
     const uLower = (u.username || '').toLowerCase();
     const uPhoneDigits = (u.phone || '').replace(/\D/g, '');
@@ -208,39 +199,30 @@ async function findUser(c: any, username: string): Promise<User | null> {
     }
   }
 
-  return users.get(lower) || users.get(username) || null;
+  return null;
 }
 
 async function persistUser(c: any, user: User): Promise<void> {
   const lower = user.username.toLowerCase().trim();
   users.set(lower, user);
   users.set(user.username, user);
-  const kv = getKV(c);
-  if (kv) {
-    try {
-      await kv.put(`user:${lower}`, JSON.stringify(user));
-      await kv.put(`user:${user.username}`, JSON.stringify(user));
-      await kv.put(`user_id:${user.id}`, JSON.stringify(user));
+  users.set(user.id, user);
 
-      // 手机号索引
-      if (user.phone) {
-        const phoneDigits = user.phone.replace(/\D/g, '');
-        if (phoneDigits) {
-          await kv.put(`user_phone:${phoneDigits}`, JSON.stringify(user));
-        }
-      }
+  // 手机号索引
+  if (user.phone) {
+    const phoneDigits = user.phone.replace(/\D/g, '');
+    if (phoneDigits) {
+      users.set(`phone:${phoneDigits}`, user);
+    }
+  }
 
-      // 邮箱前缀别名索引 (例如 Anglyao778@gmail.com -> user:anglyao778 和 user:anglyao)
-      if (lower.includes('@')) {
-        const prefix = lower.split('@')[0];
-        await kv.put(`user:${prefix}`, JSON.stringify(user));
-        const alphaOnly = prefix.replace(/\d+$/, '');
-        if (alphaOnly && alphaOnly !== prefix) {
-          await kv.put(`user:${alphaOnly}`, JSON.stringify(user));
-        }
-      }
-    } catch (e) {
-      console.warn('KV put user error:', e);
+  // 邮箱前缀别名索引 (例如 Anglyao778@gmail.com -> user:anglyao778 和 user:anglyao)
+  if (lower.includes('@')) {
+    const prefix = lower.split('@')[0];
+    users.set(prefix, user);
+    const alphaOnly = prefix.replace(/\d+$/, '');
+    if (alphaOnly && alphaOnly !== prefix) {
+      users.set(alphaOnly, user);
     }
   }
 }
@@ -266,92 +248,29 @@ async function ensureOwnerAccount(c: any): Promise<void> {
   await persistUser(c, { ...ownerUser, username: '15314519108' });
 }
 
-
 async function findSession(c: any, token: string): Promise<string | null> {
-  const kv = getKV(c);
-  if (kv) {
-    try {
-      const username = await kv.get(`session:${token}`);
-      if (username) return username;
-    } catch (e) {
-      console.warn('KV read session error:', e);
-    }
-  }
   return sessions.get(token) || null;
 }
 
 async function persistSession(c: any, token: string, username: string): Promise<void> {
   sessions.set(token, username);
-  const kv = getKV(c);
-  if (kv) {
-    try {
-      await kv.put(`session:${token}`, username, { expirationTtl: 86400 * 30 });
-    } catch (e) {
-      console.warn('KV put session error:', e);
-    }
-  }
 }
 
 async function removeSession(c: any, token: string): Promise<void> {
   sessions.delete(token);
-  const kv = getKV(c);
-  if (kv) {
-    try {
-      await kv.delete(`session:${token}`);
-    } catch (e) {}
-  }
 }
 
 async function findRoom(c: any, teamCode: string): Promise<TeamRoom | null> {
-  const kv = getKV(c);
-  if (kv) {
-    try {
-      const data = await kv.get(`room:${teamCode}`);
-      if (data) {
-        const parsed = JSON.parse(data);
-        const room: TeamRoom = {
-          code: parsed.code,
-          ownerId: parsed.ownerId,
-          ownerName: parsed.ownerName,
-          createdAt: parsed.createdAt,
-          kickedUserIds: new Set(parsed.kickedUserIds || []),
-          disbanded: parsed.disbanded || false,
-        };
-        teamRooms.set(teamCode, room);
-        return room;
-      }
-    } catch (e) {}
-  }
   return teamRooms.get(teamCode) || null;
 }
 
 async function persistRoom(c: any, room: TeamRoom): Promise<void> {
   teamRooms.set(room.code, room);
-  const kv = getKV(c);
-  if (kv) {
-    try {
-      const raw = {
-        code: room.code,
-        ownerId: room.ownerId,
-        ownerName: room.ownerName,
-        createdAt: room.createdAt,
-        kickedUserIds: Array.from(room.kickedUserIds),
-        disbanded: room.disbanded || false,
-      };
-      await kv.put(`room:${room.code}`, JSON.stringify(raw), { expirationTtl: 86400 * 14 });
-    } catch (e) {}
-  }
 }
 
 async function removeRoom(c: any, teamCode: string): Promise<void> {
   teamRooms.delete(teamCode);
   teamLocations.delete(teamCode);
-  const kv = getKV(c);
-  if (kv) {
-    try {
-      await kv.delete(`room:${teamCode}`);
-    } catch (e) {}
-  }
 }
 
 async function persistMemberLocation(c: any, teamCode: string, memberLoc: TeamMemberLocation): Promise<void> {
@@ -361,54 +280,12 @@ async function persistMemberLocation(c: any, teamCode: string, memberLoc: TeamMe
     teamLocations.set(teamCode, team);
   }
   team.set(memberLoc.userId, memberLoc);
-
-  const kv = getKV(c);
-  if (kv) {
-    try {
-      await kv.put(`member:${teamCode}:${memberLoc.userId}`, JSON.stringify(memberLoc), { expirationTtl: 1800 });
-      await kv.put(`track:${memberLoc.username}`, JSON.stringify({ ...memberLoc, teamCode }), { expirationTtl: 86400 * 3 });
-      await kv.put(`track:${memberLoc.userId}`, JSON.stringify({ ...memberLoc, teamCode }), { expirationTtl: 86400 * 3 });
-    } catch (e) {}
-  }
+  userLatestLocations.set(memberLoc.username, { ...memberLoc, teamCode });
+  userLatestLocations.set(memberLoc.userId, { ...memberLoc, teamCode });
 }
 
 async function getTeamMembersList(c: any, teamCode: string): Promise<TeamMemberLocation[]> {
   const now = Date.now();
-  const kv = getKV(c);
-  if (kv) {
-    try {
-      const list = await kv.list({ prefix: `member:${teamCode}:` });
-      if (list && list.keys && list.keys.length > 0) {
-        const mems: TeamMemberLocation[] = [];
-        for (const k of list.keys) {
-          // 彻底识别并物理清理历史游客/行者残留数据
-          if (k.name.includes(':user_guest') || k.name.includes(':guest')) {
-            kv.delete(k.name).catch(() => {});
-            continue;
-          }
-          const val = await kv.get(k.name);
-          if (val) {
-            try {
-              const loc: TeamMemberLocation = JSON.parse(val);
-              const uid = String(loc.userId || '');
-              const uname = String(loc.username || '');
-              const nick = String(loc.name || '');
-
-              if (uid.startsWith('user_guest') || uid === 'guest' || uname.startsWith('guest') || nick.startsWith('行者')) {
-                kv.delete(k.name).catch(() => {});
-                continue;
-              }
-              if (now - loc.updatedAt < 20 * 60 * 1000) {
-                mems.push(loc);
-              }
-            } catch (e) {}
-          }
-        }
-        return mems;
-      }
-    } catch (e) {}
-  }
-
   const team = teamLocations.get(teamCode);
   const memList: TeamMemberLocation[] = [];
   if (team) {
@@ -430,12 +307,6 @@ async function getTeamMembersList(c: any, teamCode: string): Promise<TeamMemberL
 async function removeMemberFromTeam(c: any, teamCode: string, userId: string): Promise<void> {
   const team = teamLocations.get(teamCode);
   if (team) team.delete(userId);
-  const kv = getKV(c);
-  if (kv) {
-    try {
-      await kv.delete(`member:${teamCode}:${userId}`);
-    } catch (e) {}
-  }
 }
 
 // ============================================================================
@@ -608,107 +479,66 @@ app.post('/api/auth/set-password', async (c) => {
 });
 
 app.get('/api/system/users', async (c) => {
-  const kv = getKV(c);
-  // 确保您的主账号安全就绪
   try {
     await ensureOwnerAccount(c);
   } catch (e) {}
 
   const userList: any[] = [];
-  if (kv) {
-    try {
-      const list = await kv.list({ prefix: 'user:' });
-      if (list && list.keys) {
-        for (const k of list.keys) {
-          const val = await kv.get(k.name);
-          if (val) {
-            try {
-              const u = JSON.parse(val);
-              const uName = String(u.username || '');
-              const nick = String(u.name || '');
-              if (uName.startsWith('guest') || uName === '859151' || uName === '678545' || uName === '910637' || uName === '421449' || uName === '991808' || nick.startsWith('行者')) {
-                kv.delete(k.name).catch(() => {});
-                continue;
-              }
-              if (!userList.some((existing) => existing.username === u.username)) {
-                userList.push({
-                  username: u.username,
-                  name: u.name,
-                  phone: u.phone,
-                  password: u.password,
-                });
-              }
-            } catch (e) {}
-          }
-        }
-      }
-    } catch (e) {}
+  // 1. 优先加载固化账号
+  for (const acc of HARDCODED_ACCOUNTS) {
+    const live = users.get(acc.username) || users.get(acc.username.toLowerCase()) || acc;
+    userList.push({
+      username: acc.username,
+      name: live.name || acc.name,
+      phone: live.phone || acc.phone,
+    });
   }
-  // 检查内存中的用户并合并至列表与 KV
+
+  // 2. 检查内存中动态注册的其他用户
   for (const [, u] of users.entries()) {
     const uName = String(u.username || '');
     const nick = String(u.name || '');
     if (uName.startsWith('guest') || nick.startsWith('行者')) continue;
-    if (!userList.some((existing) => existing.username === u.username)) {
+    if (!userList.some((existing) => existing.username.toLowerCase() === u.username.toLowerCase())) {
       userList.push({
         username: u.username,
         name: u.name,
         phone: u.phone,
       });
-      if (kv) {
-        persistUser(c, u).catch(() => {});
-      }
     }
   }
+
   return c.json({
     success: true,
     total: userList.length,
-    kvConnected: !!kv,
+    storage: 'file_hardcoded',
     users: userList,
   });
 });
 
 // 一键清理所有历史游客/行者残留数据接口
 app.get('/api/system/cleanup-guests', async (c) => {
-  const kv = getKV(c);
   let deletedCount = 0;
-  if (kv) {
-    try {
-      // 1. 清理 member: 中的游客
-      const memList = await kv.list({ prefix: 'member:' });
-      if (memList && memList.keys) {
-        for (const k of memList.keys) {
-          if (k.name.includes('guest') || k.name.includes('678545') || k.name.includes('910637') || k.name.includes('421449') || k.name.includes('991808') || k.name.includes('859151')) {
-            await kv.delete(k.name);
-            deletedCount++;
-          }
-        }
+  for (const [, team] of teamLocations.entries()) {
+    for (const [uid] of team.entries()) {
+      if (uid.startsWith('user_guest') || uid === 'guest') {
+        team.delete(uid);
+        deletedCount++;
       }
-      // 2. 清理 user: 中的游客
-      const uList = await kv.list({ prefix: 'user:' });
-      if (uList && uList.keys) {
-        for (const k of uList.keys) {
-          if (k.name.includes('guest') || k.name.includes('678545') || k.name.includes('910637') || k.name.includes('421449') || k.name.includes('991808') || k.name.includes('859151')) {
-            await kv.delete(k.name);
-            deletedCount++;
-          }
-        }
-      }
-      // 3. 清理 track: 中的游客
-      const tList = await kv.list({ prefix: 'track:' });
-      if (tList && tList.keys) {
-        for (const k of tList.keys) {
-          if (k.name.includes('guest') || k.name.includes('678545') || k.name.includes('910637') || k.name.includes('421449') || k.name.includes('991808') || k.name.includes('859151')) {
-            await kv.delete(k.name);
-            deletedCount++;
-          }
-        }
-      }
-    } catch (e) {}
+    }
   }
-  // 清空内存中的旧小队位置
-  teamLocations.clear();
-  return c.json({ success: true, message: `已彻底清理 ${deletedCount} 条历史游客与行者残留记录` });
+  for (const [key] of users.entries()) {
+    if (key.startsWith('guest') || key.startsWith('user_guest')) {
+      users.delete(key);
+      deletedCount++;
+    }
+  }
+  return c.json({
+    success: true,
+    deletedCount,
+    storage: 'file_hardcoded',
+    message: `已彻底清理 ${deletedCount} 条内存游客残留记录`,
+  });
 });
 
 // ============================================================================
@@ -826,15 +656,6 @@ async function handleTrackingLookup(c: any, identifier: string) {
   }
 
   let loc = userLatestLocations.get(identifier);
-
-  if (!loc && c.env?.SAFETY_KV) {
-    try {
-      const data = await c.env.SAFETY_KV.get(`track:${identifier}`);
-      if (data) {
-        loc = JSON.parse(data);
-      }
-    } catch (e) {}
-  }
 
   if (!loc) {
     for (const [tCode, teamMap] of teamLocations.entries()) {
@@ -1086,16 +907,6 @@ app.post('/api/upload', async (c) => {
       filename,
     });
 
-    const kv = getKV(c);
-    if (kv) {
-      try {
-        await kv.put(`img:${imageId}`, arrayBuffer, {
-          metadata: { mimeType, filename },
-          expirationTtl: 86400 * 30,
-        });
-      } catch (e) {}
-    }
-
     return c.json({
       success: true,
       message: '图片上传成功',
@@ -1123,25 +934,6 @@ app.get('/api/images/:id', async (c) => {
         'Content-Disposition': `inline; filename="${img.filename}"`,
       },
     });
-  }
-
-  const kv = getKV(c);
-  if (kv) {
-    try {
-      const kvResult = (await kv.getWithMetadata(`img:${id}`, 'arrayBuffer')) as any;
-      if (kvResult && kvResult.value) {
-        const mimeType = kvResult.metadata?.mimeType || 'image/jpeg';
-        const filename = kvResult.metadata?.filename || `${id}.jpg`;
-        return new Response(kvResult.value, {
-          status: 200,
-          headers: {
-            'Content-Type': mimeType,
-            'Cache-Control': 'public, max-age=86400',
-            'Content-Disposition': `inline; filename="${filename}"`,
-          },
-        });
-      }
-    } catch (e) {}
   }
 
   return c.text('Image Not Found', 404);
