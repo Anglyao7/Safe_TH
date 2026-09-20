@@ -172,6 +172,7 @@
     initIcons();
     initAuthSystem();
     initNavigation();
+    initCollapsiblePanels();
     initMap();
     initRadarMap();
     initProfileForm();
@@ -431,6 +432,52 @@
         }
       });
     }
+  }
+
+  // ==========================================
+  // 4.1 移动端面板折叠与空间收缩管理
+  // ==========================================
+  function initCollapsiblePanels() {
+    function setupToggle(btnId, contentId, storageKey, defaultCollapsedOnMobile = false) {
+      const btn = document.getElementById(btnId);
+      const content = document.getElementById(contentId);
+      if (!btn || !content) return;
+
+      const isMobile = window.innerWidth <= 640;
+      const saved = localStorage.getItem(storageKey);
+      let isCollapsed = saved !== null ? saved === 'true' : (isMobile && defaultCollapsedOnMobile);
+
+      function applyState() {
+        if (isCollapsed) {
+          content.classList.add('collapsed');
+          btn.classList.add('collapsed');
+          btn.setAttribute('aria-expanded', 'false');
+        } else {
+          content.classList.remove('collapsed');
+          btn.classList.remove('collapsed');
+          btn.setAttribute('aria-expanded', 'true');
+        }
+      }
+
+      applyState();
+
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        isCollapsed = !isCollapsed;
+        applyState();
+        try {
+          localStorage.setItem(storageKey, isCollapsed ? 'true' : 'false');
+        } catch (err) {}
+      });
+    }
+
+    // 1. 出行安全就绪度清单 (折叠后保留顶部进度条与打分，省下竖向空间)
+    setupToggle('toggle-readiness-btn', 'readiness-checklist', 'hutu_fold_readiness', false);
+    // 2. 官方救援直连通道 (折叠后保留标题，点击展开拨号)
+    setupToggle('toggle-channels-btn', 'channel-list-content', 'hutu_fold_channels', false);
+    // 3. 求助信息包摘要预览 (折叠后保留一键发短信与档案跳转按钮，省下长报文预览)
+    setupToggle('toggle-payload-btn', 'payload-collapsible-content', 'hutu_fold_payload', false);
   }
 
   // ==========================================

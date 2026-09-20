@@ -2,7 +2,7 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#0B1116" />
     <meta
       name="description"
@@ -317,8 +317,13 @@
                       <div class="eyebrow"><i data-lucide="activity"></i> READINESS SCORE</div>
                       <h2>出行安全就绪度</h2>
                     </div>
-                    <div class="readiness-badge">
-                      <span id="readiness-value" class="readiness-value">0%</span>
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                      <div class="readiness-badge">
+                        <span id="readiness-value" class="readiness-value">0%</span>
+                      </div>
+                      <button id="toggle-readiness-btn" class="mobile-toggle-btn" type="button" aria-label="收起或展开自检清单" title="收起/展开待办清单">
+                        <i data-lucide="chevron-up" id="toggle-readiness-icon"></i>
+                      </button>
                     </div>
                   </div>
 
@@ -328,7 +333,7 @@
                     </div>
                   </div>
 
-                  <div class="checklist" id="readiness-checklist">
+                  <div class="checklist collapsible-content" id="readiness-checklist">
                     <div class="checklist-item" id="check-profile-item">
                       <span class="check-icon" data-check="profile"><i data-lucide="circle"></i></span>
                       <div class="check-info">
@@ -369,10 +374,15 @@
                     <div class="eyebrow"><i data-lucide="phone-incoming"></i> OFFICIAL DIRECT DIAL</div>
                     <h2>官方救援直连通道</h2>
                   </div>
-                  <span class="section-helper">点击直接拨号 (无需网络)</span>
+                  <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <span class="section-helper">无需网络 · 直拨电话</span>
+                    <button id="toggle-channels-btn" class="mobile-toggle-btn" type="button" aria-label="收起或展开直拨通道" title="收起/展开直拨通道">
+                      <i data-lucide="chevron-up" id="toggle-channels-icon"></i>
+                    </button>
+                  </div>
                 </div>
 
-                <div class="channel-list">
+                <div class="channel-list collapsible-content" id="channel-list-content">
                   <article class="channel-row">
                     <div class="channel-icon channel-icon-red">
                       <i data-lucide="phone-call"></i>
@@ -450,39 +460,46 @@
                     <div class="eyebrow"><i data-lucide="file-text"></i> RESCUE PAYLOAD</div>
                     <h2>求助信息包摘要</h2>
                   </div>
-                  <button id="open-payload" class="text-button" type="button">
-                    <i data-lucide="copy"></i>
-                    <span>复制求助报文</span>
-                  </button>
+                  <div style="display: flex; align-items: center; gap: 0.4rem;">
+                    <button id="open-payload" class="text-button" type="button">
+                      <i data-lucide="copy"></i>
+                      <span>复制</span>
+                    </button>
+                    <button id="toggle-payload-btn" class="mobile-toggle-btn" type="button" aria-label="收起或展开报文预览" title="收起/展开报文预览">
+                      <i data-lucide="chevron-up" id="toggle-payload-icon"></i>
+                    </button>
+                  </div>
                 </div>
 
-                <p class="payload-intro">
-                  触发紧急流程时，将自动组装以下格式化求助报文供你一键发送至紧急联系人或警方。
-                </p>
+                <div class="collapsible-content" id="payload-collapsible-content">
+                  <p class="payload-intro">
+                    触发紧急流程时，将自动组装以下格式化求助报文供你一键发送至紧急联系人或警方。
+                  </p>
 
-                <div class="payload-tags">
-                  <span class="payload-tag"><i data-lucide="user-check"></i> 身份档案</span>
-                  <span class="payload-tag"><i data-lucide="crosshair"></i> GPS 精准定位</span>
-                  <span class="payload-tag"><i data-lucide="users"></i> 联系人网</span>
-                  <span class="payload-tag"><i data-lucide="map"></i> 谷歌地图直链</span>
-                </div>
+                  <div class="payload-tags">
+                    <span class="payload-tag"><i data-lucide="user-check"></i> 身份档案</span>
+                    <span class="payload-tag"><i data-lucide="crosshair"></i> GPS 精准定位</span>
+                    <span class="payload-tag"><i data-lucide="users"></i> 联系人网</span>
+                    <span class="payload-tag"><i data-lucide="map"></i> 谷歌地图直链</span>
+                  </div>
 
-                <div class="payload-preview">
-                  <div class="payload-preview-top">
-                    <span class="payload-live-indicator"><span class="dot-beacon"></span>实时动态封装</span>
-                    <span id="payload-updated">等待完善资料</span>
-                  </div>
-                  <div class="payload-line">
-                    <span class="p-label">求助人员</span>
-                    <strong id="payload-name" class="p-value">未填写姓名</strong>
-                  </div>
-                  <div class="payload-line">
-                    <span class="p-label">当前位置</span>
-                    <strong id="payload-location" class="p-value">坐标待获取</strong>
-                  </div>
-                  <div class="payload-line">
-                    <span class="p-label">紧急联络</span>
-                    <strong id="payload-contacts" class="p-value">0 位联系人已同步</strong>
+                  <div class="payload-preview">
+                    <div class="payload-preview-top">
+                      <span class="payload-live-indicator"><span class="dot-beacon"></span>实时动态封装</span>
+                      <span id="payload-updated">等待完善资料</span>
+                    </div>
+                    <div class="payload-line">
+                      <span class="p-label">求助人员</span>
+                      <strong id="payload-name" class="p-value">未填写姓名</strong>
+                    </div>
+                    <div class="payload-line">
+                      <span class="p-label">当前位置</span>
+                      <strong id="payload-location" class="p-value">坐标待获取</strong>
+                    </div>
+                    <div class="payload-line">
+                      <span class="p-label">紧急联络</span>
+                      <strong id="payload-contacts" class="p-value">0 位联系人已同步</strong>
+                    </div>
                   </div>
                 </div>
 
@@ -1063,6 +1080,7 @@
     <!-- SOS 双重确认与调度弹窗 -->
     <div id="alert-modal" class="modal-backdrop" hidden>
       <div class="modal glass-card-modal" role="dialog" aria-modal="true" aria-labelledby="alert-modal-title">
+        <div class="modal-drag-handle"></div>
         <div class="modal-header">
           <div class="modal-title-group">
             <div class="eyebrow eyebrow-crimson"><i data-lucide="alert-triangle"></i> EMERGENCY DISPATCH</div>
@@ -1082,6 +1100,7 @@
     <!-- 登录与注册弹窗 (支持清晰选项卡切换) -->
     <div id="auth-modal" class="modal-backdrop" hidden>
       <div class="modal glass-card-modal auth-modal-box" role="dialog" aria-modal="true" aria-labelledby="auth-modal-title">
+        <div class="modal-drag-handle"></div>
         <div class="modal-header">
           <div class="modal-title-group">
             <div class="eyebrow"><i data-lucide="fingerprint"></i> SAFE TRAVEL AUTH</div>
@@ -1270,6 +1289,7 @@
     <!-- 已登录用户个人中心卡片弹窗 -->
     <div id="user-center-modal" class="modal-backdrop" hidden>
       <div class="modal glass-card-modal auth-modal-box" role="dialog" aria-modal="true" aria-labelledby="user-center-title">
+        <div class="modal-drag-handle"></div>
         <div class="modal-header">
           <div class="modal-title-group">
             <div class="eyebrow"><i data-lucide="user-check"></i> PROFILE CENTER</div>
@@ -1337,6 +1357,7 @@
     <!-- 切换/加入小队房间号弹窗 -->
     <div id="team-modal" class="modal-backdrop" hidden>
       <div class="modal glass-card-modal auth-modal-box" role="dialog" aria-modal="true" aria-labelledby="team-modal-title">
+        <div class="modal-drag-handle"></div>
         <div class="modal-header">
           <div class="modal-title-group">
             <div class="eyebrow"><i data-lucide="users"></i> TRIP SQUAD RADAR</div>
