@@ -2247,6 +2247,16 @@ ${googleMapUrl}
     if (layerToggleBtn && layerPopover) {
       function setLayerPopoverOpen(open) {
         if (open) {
+          // 动态计算智能水平对齐，确保完全在屏幕可视区域内，绝不溢出或被裁切
+          const rect = layerToggleBtn.getBoundingClientRect();
+          const popoverWidth = 280;
+          if (rect.left + popoverWidth > window.innerWidth - 12) {
+            layerPopover.style.left = 'auto';
+            layerPopover.style.right = '0';
+          } else {
+            layerPopover.style.left = '0';
+            layerPopover.style.right = 'auto';
+          }
           layerPopover.removeAttribute('hidden');
           layerToggleBtn.classList.add('active');
           layerToggleBtn.setAttribute('aria-expanded', 'true');
@@ -2284,6 +2294,17 @@ ${googleMapUrl}
           }
         }
       });
+
+      // 触摸或点击地图画布区域自动收起下拉面板
+      const mapCanvas = document.getElementById('radar-fullscreen-map');
+      if (mapCanvas) {
+        mapCanvas.addEventListener('mousedown', () => {
+          if (!layerPopover.hasAttribute('hidden')) setLayerPopoverOpen(false);
+        });
+        mapCanvas.addEventListener('touchstart', () => {
+          if (!layerPopover.hasAttribute('hidden')) setLayerPopoverOpen(false);
+        }, { passive: true });
+      }
 
       // 按 ESC 键快速关闭
       document.addEventListener('keydown', (e) => {

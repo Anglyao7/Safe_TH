@@ -2582,27 +2582,44 @@ button, a, input, select, textarea {
     flex-direction: column;
     align-items: stretch;
     gap: 0.5rem;
+    position: relative;
+    z-index: 800;
   }
 
   .radar-toolbar-left {
     display: flex;
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    padding-bottom: 4px;
+    flex-wrap: wrap;
+    overflow: visible;
+    padding-bottom: 0;
     gap: 0.45rem;
-    scrollbar-width: none;
-  }
-
-  .radar-toolbar-left::-webkit-scrollbar {
-    display: none;
+    position: relative;
   }
 
   .radar-toolbar-left .button {
     flex-shrink: 0;
     white-space: nowrap;
-    padding: 5px 10px;
+    padding: 6px 11px;
     font-size: 0.74rem;
+  }
+
+  .radar-layer-dropdown-wrapper {
+    position: relative;
+    z-index: 850;
+  }
+
+  .radar-layer-popover {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    width: 280px;
+    max-width: calc(100vw - 2rem);
+    z-index: 1500;
+    background: rgba(14, 22, 30, 0.98);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.08);
   }
 
   .radar-toolbar-right {
@@ -3448,6 +3465,7 @@ body,
   flex-direction: column;
   gap: 1rem;
   width: 100%;
+  position: relative;
 }
 
 .radar-map-toolbar {
@@ -3456,6 +3474,8 @@ body,
   align-items: center;
   flex-wrap: wrap;
   gap: 0.75rem;
+  position: relative;
+  z-index: 800;
 }
 
 .radar-toolbar-left {
@@ -3463,6 +3483,7 @@ body,
   align-items: center;
   gap: 0.65rem;
   flex-wrap: wrap;
+  position: relative;
 }
 
 .radar-toolbar-right {
@@ -3490,6 +3511,7 @@ body,
   box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.3);
   width: 100%;
   min-height: 620px;
+  z-index: 10;
 }
 
 .radar-live-tracking-banner {
@@ -3618,20 +3640,26 @@ html[data-theme="light"] .radar-live-tracking-banner {
 .radar-layer-dropdown-wrapper {
   position: relative;
   display: inline-flex;
+  z-index: 850;
 }
 
 .radar-layer-popover {
   position: absolute;
   top: calc(100% + 8px);
   left: 0;
-  width: 260px;
-  z-index: 1000;
-  padding: 0.6rem;
+  width: 275px;
+  max-width: min(320px, calc(100vw - 2rem));
+  z-index: 1500;
+  padding: 0.65rem;
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
-  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--border-subtle);
+  background: rgba(14, 22, 30, 0.97);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
+  box-shadow: 0 18px 45px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.08);
   animation: popover-fade-in 0.18s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
