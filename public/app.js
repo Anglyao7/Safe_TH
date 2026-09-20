@@ -1227,6 +1227,17 @@
     const validCount = state.contacts.filter((c) => c.name.trim() && c.phone.trim()).length;
     if (pContacts) pContacts.textContent = `${validCount} 位联系人已同步`;
 
+    const smsBtnText = document.getElementById('overview-sms-btn-text');
+    if (smsBtnText) {
+      const validContacts = state.contacts.filter((c) => c && c.phone && c.phone.trim());
+      const primary = validContacts.find((c) => c.isPrimary) || (validContacts.length > 0 ? validContacts[0] : null);
+      if (primary) {
+        smsBtnText.textContent = `一键发求助短信给: ${primary.name || '首要联系人'} (${primary.phone})`;
+      } else {
+        smsBtnText.textContent = `一键调起系统短信发送求助`;
+      }
+    }
+
     updateReadinessScore();
     updateMyRadarMarker();
   }
@@ -1316,6 +1327,19 @@
             <i data-lucide="${contact.isPrimary ? 'star' : 'star-off'}"></i>
             <span>${contact.isPrimary ? '设为优先首要联系人' : '设为第一顺位'}</span>
           </button>
+          ${
+            contact.phone && contact.phone.trim()
+              ? `<a href="${buildSmsUri(
+                  contact.phone,
+                  generateSosPayloadText()
+                )}" class="text-button contact-quick-sms-btn" target="_self" data-name="${escapeHtml(
+                  contact.name || '联系人'
+                )}" title="向此联系人发送求助短信">
+                  <i data-lucide="message-square"></i>
+                  <span>发求助短信</span>
+                </a>`
+              : ''
+          }
         </div>
       `;
       grid.appendChild(card);
@@ -1356,12 +1380,31 @@
       });
     });
 
+    grid.querySelectorAll('.contact-quick-sms-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const name = btn.getAttribute('data-name') || '联系人';
+        copyToClipboard(
+          generateSosPayloadText(),
+          `正在调起发送给【${name}】的系统短信！求助报文已同步复制到剪贴板`
+        );
+      });
+    });
+
     initIcons();
   }
 
   // ==========================================
   // 9. SOS 一键报警与求助调度流程
   // ==========================================
+  function buildSmsUri(phone, body) {
+    const cleanPhone = (phone || '').trim().replace(/[^\d+]/g, '');
+    const isIOS =
+      /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const separator = isIOS ? '&body=' : '?body=';
+    return `sms:${cleanPhone}${separator}${encodeURIComponent(body || '')}`;
+  }
+
   function getMyLiveTrackingUrl() {
     const myUsername = (state.user && state.user.username) || (state.profile.phone) || (state.profile.name) || 'guest';
     const cleanOrigin = window.location.origin;
@@ -1413,6 +1456,7 @@ ${googleMapUrl}
     const closeBtn = document.getElementById('close-alert-modal');
     const modalContent = document.getElementById('alert-modal-content');
     const openPayloadBtn = document.getElementById('open-payload');
+    const overviewSmsBtn = document.getElementById('overview-sms-btn');
 
     function openSosModal() {
       const payloadText = generateSosPayloadText();
@@ -1421,6 +1465,15 @@ ${googleMapUrl}
       if (navigator.vibrate) {
         navigator.vibrate([200, 100, 200]);
       }
+
+      // 获取有效紧急联系人
+      const validContacts = state.contacts.filter((c) => c && c.phone && c.phone.trim());
+      const primaryContact = validContacts.find((c) => c.isPrimary) || (validContacts.length > 0 ? validContacts[0] : null);
+      const otherContacts = validContacts.filter((c) => c !== primaryContact);
+
+      const primaryPhone = primaryContact ? primaryContact.phone.trim() : '';
+      const primaryName = primaryContact ? (primaryContact.name.trim() || '首要联系人') : '';
+      const primarySmsUrl = buildSmsUri(primaryPhone, payloadText);
 
       if (modalContent) {
         modalContent.innerHTML = `
@@ -1436,14 +1489,52 @@ ${googleMapUrl}
           <pre class="modal-payload-box">${escapeHtml(payloadText)}</pre>
 
           <div class="modal-actions">
+            <!-- 核心功能：一键调起系统短信 -->
+            ${
+              primaryContact
+                ? `<a href="${primarySmsUrl}" class="button button-sms button-full" id="modal-sms-btn" target="_self">
+                    <i data-lucide="message-square"></i>
+                    <div class="sms-btn-text">
+                      <span class="sms-btn-title">一键调起短信发送求助报文</span>
+                      <span class="sms-btn-sub">收件人: ${escapeHtml(primaryName)} (${escapeHtml(primaryPhone)})</span>
+                    </div>
+                  </a>`
+                : `<a href="${primarySmsUrl}" class="button button-sms button-sms-outline button-full" id="modal-sms-btn" target="_self">
+                    <i data-lucide="message-square"></i>
+                    <div class="sms-btn-text">
+                      <span class="sms-btn-title">一键调起短信草稿 (未预填联系人)</span>
+                      <span class="sms-btn-sub">建议去「个人档案」补齐联系人，点击直接进系统短信箱</span>
+                    </div>
+                  </a>`
+            }
+
+            ${
+              otherContacts.length > 0
+                ? `<div class="modal-other-sms">
+                    <span class="other-sms-label">快捷发送至其他预设联系人：</span>
+                    <div class="other-sms-chips">
+                      ${otherContacts
+                        .map(
+                          (c) => `
+                        <a href="${buildSmsUri(c.phone, payloadText)}" class="sms-chip" target="_self" data-name="${escapeHtml(c.name || '联系人')}">
+                          <i data-lucide="send"></i>
+                          <span>${escapeHtml(c.name || '联系人')}: ${escapeHtml(c.phone)}</span>
+                        </a>`
+                        )
+                        .join('')}
+                    </div>
+                  </div>`
+                : ''
+            }
+
             <button id="modal-copy-btn" class="button button-primary button-full" type="button">
               <i data-lucide="copy"></i>
-              <span>一键复制完整求助报文 (含实时动态追踪链接)</span>
+              <span>一键复制完整求助报文 (发微信/群聊)</span>
             </button>
 
             <button id="modal-copy-track-btn" class="button button-secondary button-full" type="button" style="border-color: rgba(16, 185, 129, 0.4); color: var(--emerald-400);">
               <i data-lucide="share-2"></i>
-              <span>仅复制我的专属实时追踪网址链接 (发微信/群聊)</span>
+              <span>仅复制我的专属实时追踪网址链接</span>
             </button>
 
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.65rem;">
@@ -1467,6 +1558,28 @@ ${googleMapUrl}
 
       modal.removeAttribute('hidden');
       initIcons();
+
+      // 绑定短信按钮双重保障 (调起短信同时把报文复制到剪贴板，防止短信应用被截断或异常)
+      const smsBtn = document.getElementById('modal-sms-btn');
+      if (smsBtn) {
+        smsBtn.addEventListener('click', () => {
+          copyToClipboard(
+            payloadText,
+            primaryContact
+              ? `正在调起短信给【${primaryName}】！求助报文已同步复制到剪贴板`
+              : '正在调起系统短信草稿... 报文已同步备份到剪贴板！'
+          );
+        });
+      }
+
+      if (modalContent) {
+        modalContent.querySelectorAll('.sms-chip').forEach((chip) => {
+          chip.addEventListener('click', () => {
+            const name = chip.getAttribute('data-name') || '联系人';
+            copyToClipboard(payloadText, `正在调起短信给【${name}】！求助报文已同步复制到剪贴板`);
+          });
+        });
+      }
 
       // 绑定复制按钮
       const copyBtn = document.getElementById('modal-copy-btn');
@@ -1492,6 +1605,24 @@ ${googleMapUrl}
     if (openPayloadBtn) {
       openPayloadBtn.addEventListener('click', () => {
         copyToClipboard(generateSosPayloadText());
+      });
+    }
+
+    if (overviewSmsBtn) {
+      overviewSmsBtn.addEventListener('click', () => {
+        const payload = generateSosPayloadText();
+        const validContacts = state.contacts.filter((c) => c && c.phone && c.phone.trim());
+        const primary = validContacts.find((c) => c.isPrimary) || (validContacts.length > 0 ? validContacts[0] : null);
+        const phone = primary ? primary.phone : '';
+        const name = primary ? primary.name : '';
+        const uri = buildSmsUri(phone, payload);
+        copyToClipboard(
+          payload,
+          primary
+            ? `已调起发送给【${name || '紧急联系人'}】的系统短信！报文已同步备份至剪贴板`
+            : '已调起系统短信草稿！报文已同步备份至剪贴板，可从通讯录挑选收件人'
+        );
+        window.location.href = uri;
       });
     }
 

@@ -584,6 +584,69 @@ body {
   box-shadow: 0 0 16px var(--crimson-glow);
 }
 
+/* 紧急求助短信专用按钮 (高识别度红色渐变与强调排版) */
+.button-sms {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 50%, #b91c1c 100%);
+  color: #ffffff !important;
+  border: 1px solid rgba(254, 202, 202, 0.4);
+  box-shadow: 0 4px 16px rgba(239, 68, 68, 0.35), 0 0 12px rgba(239, 68, 68, 0.2);
+  padding: 0.75rem 1.15rem;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  border-radius: var(--radius-md);
+  text-decoration: none;
+  cursor: pointer;
+  transition: all var(--transition-normal);
+  position: relative;
+  overflow: hidden;
+}
+
+.button-sms:hover {
+  background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+  box-shadow: 0 6px 20px rgba(239, 68, 68, 0.5), 0 0 18px rgba(239, 68, 68, 0.4);
+  transform: translateY(-1px);
+  color: #ffffff !important;
+}
+
+.button-sms:active {
+  transform: translateY(0);
+}
+
+.button-sms .sms-btn-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  line-height: 1.35;
+}
+
+.button-sms .sms-btn-title {
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.button-sms .sms-btn-sub {
+  font-size: 0.75rem;
+  opacity: 0.92;
+  font-weight: 400;
+}
+
+.button-sms-outline {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px dashed rgba(239, 68, 68, 0.5);
+  color: var(--crimson-400) !important;
+  box-shadow: none;
+}
+
+.button-sms-outline:hover {
+  background: rgba(239, 68, 68, 0.22);
+  color: #ffffff !important;
+}
+
 .button-compact {
   padding: 0.42rem 0.85rem;
   font-size: 0.78rem;
@@ -2257,6 +2320,73 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+
+/* 模态框与其他联系人快捷发短信 Chips */
+.modal-other-sms {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin-top: -0.2rem;
+  margin-bottom: 0.2rem;
+  background: rgba(239, 68, 68, 0.06);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.85rem;
+}
+
+.other-sms-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.other-sms-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.sms-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.76rem;
+  padding: 0.35rem 0.65rem;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: var(--radius-full);
+  color: var(--crimson-400);
+  text-decoration: none;
+  transition: all var(--transition-fast);
+}
+
+.sms-chip:hover {
+  background: var(--crimson-500);
+  border-color: var(--crimson-500);
+  color: #ffffff !important;
+}
+
+.payload-actions-grid {
+  margin-top: 0.85rem;
+  margin-bottom: 0.5rem;
+}
+
+.contact-quick-sms-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  color: var(--crimson-400) !important;
+  text-decoration: none;
+  padding: 0.25rem 0.4rem;
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
+}
+
+.contact-quick-sms-btn:hover {
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--crimson-300) !important;
 }
 
 /* Toast 提示条 */
